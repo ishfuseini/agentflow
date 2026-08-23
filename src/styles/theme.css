@@ -1,0 +1,121 @@
+/* Design tokens — binding source: docs/design/design.md.
+ * OKLCH scales anchored to the documented semantic values:
+ *   rebeccapurple-500 = #522988 (primary), darkcyan-500 = #327367 (accent),
+ *   sienna-500 = oklch(0.58 0.17 44) (warning/HITL).
+ * Intermediate steps interpolate lightness through the anchor; chroma tapers
+ * toward the extremes of each scale. */
+
+@theme {
+  /* Typography */
+  --font-heading: "Cabin", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inconsolata", ui-monospace, "SF Mono", monospace;
+
+  /* Semantic roles */
+  --color-background: #d8d4cd;
+  --color-foreground: #131316;
+  --color-foreground-muted: #444446;
+
+  /* rebeccapurple — primary (titles, CTAs, user bubbles, tool icons) */
+  --color-rebeccapurple-50: oklch(0.975 0.045 299);
+  --color-rebeccapurple-100: oklch(0.858 0.068 299);
+  --color-rebeccapurple-200: oklch(0.741 0.09 299);
+  --color-rebeccapurple-300: oklch(0.624 0.12 299);
+  --color-rebeccapurple-400: oklch(0.507 0.138 299);
+  --color-rebeccapurple-500: oklch(0.39 0.15 299);
+  --color-rebeccapurple-600: oklch(0.342 0.143 299);
+  --color-rebeccapurple-700: oklch(0.294 0.135 299);
+  --color-rebeccapurple-800: oklch(0.246 0.123 299);
+  --color-rebeccapurple-900: oklch(0.198 0.105 299);
+  --color-rebeccapurple-950: oklch(0.15 0.083 299);
+
+  /* darkcyan — accent (section headings, idle/done node borders, connectors) */
+  --color-darkcyan-50: oklch(0.975 0.021 179.5);
+  --color-darkcyan-100: oklch(0.882 0.031 179.5);
+  --color-darkcyan-200: oklch(0.733 0.041 179.5);
+  --color-darkcyan-300: oklch(0.659 0.055 179.5);
+  --color-darkcyan-400: oklch(0.584 0.063 179.5);
+  --color-darkcyan-500: oklch(0.51 0.069 179.5);
+  --color-darkcyan-600: oklch(0.438 0.066 179.5);
+  --color-darkcyan-700: oklch(0.366 0.062 179.5);
+  --color-darkcyan-800: oklch(0.294 0.056 179.5);
+  --color-darkcyan-900: oklch(0.222 0.048 179.5);
+  --color-darkcyan-950: oklch(0.15 0.038 179.5);
+
+  /* darkgrey — neutral chrome (dividers, card fills, muted borders) */
+  --color-darkgrey-50: oklch(0.975 0.003 260);
+  --color-darkgrey-100: oklch(0.87 0.005 260);
+  --color-darkgrey-200: oklch(0.765 0.006 260);
+  --color-darkgrey-300: oklch(0.66 0.008 260);
+  --color-darkgrey-400: oklch(0.555 0.009 260);
+  --color-darkgrey-500: oklch(0.45 0.01 260);
+  --color-darkgrey-600: oklch(0.39 0.01 260);
+  --color-darkgrey-700: oklch(0.33 0.009 260);
+  --color-darkgrey-800: oklch(0.27 0.008 260);
+  --color-darkgrey-900: oklch(0.21 0.007 260);
+  --color-darkgrey-950: oklch(0.15 0.006 260);
+
+  /* sienna — warning (HITL gate, risk warnings) */
+  --color-sienna-50: oklch(0.975 0.051 44);
+  --color-sienna-100: oklch(0.896 0.077 44);
+  --color-sienna-200: oklch(0.817 0.102 44);
+  --color-sienna-300: oklch(0.738 0.136 44);
+  --color-sienna-400: oklch(0.659 0.156 44);
+  --color-sienna-500: oklch(0.58 0.17 44);
+  --color-sienna-600: oklch(0.494 0.162 44);
+  --color-sienna-700: oklch(0.408 0.153 44);
+  --color-sienna-800: oklch(0.322 0.139 44);
+  --color-sienna-900: oklch(0.236 0.119 44);
+  --color-sienna-950: oklch(0.15 0.094 44);
+
+  /* dodgerblue — informational */
+  --color-dodgerblue-50: oklch(0.975 0.057 253.2);
+  --color-dodgerblue-100: oklch(0.91 0.086 253.2);
+  --color-dodgerblue-200: oklch(0.846 0.114 253.2);
+  --color-dodgerblue-300: oklch(0.781 0.152 253.2);
+  --color-dodgerblue-400: oklch(0.717 0.175 253.2);
+  --color-dodgerblue-500: oklch(0.652 0.19 253.2);
+  --color-dodgerblue-600: oklch(0.552 0.181 253.2);
+  --color-dodgerblue-700: oklch(0.451 0.171 253.2);
+  --color-dodgerblue-800: oklch(0.351 0.156 253.2);
+  --color-dodgerblue-900: oklch(0.25 0.133 253.2);
+  --color-dodgerblue-950: oklch(0.15 0.105 253.2);
+
+  /* palevioletred — secondary accent */
+  --color-palevioletred-50: oklch(0.975 0.041 0.7);
+  --color-palevioletred-100: oklch(0.916 0.062 0.7);
+  --color-palevioletred-200: oklch(0.857 0.083 0.7);
+  --color-palevioletred-300: oklch(0.797 0.11 0.7);
+  --color-palevioletred-400: oklch(0.737 0.127 0.7);
+  --color-palevioletred-500: oklch(0.678 0.138 0.7);
+  --color-palevioletred-600: oklch(0.572 0.131 0.7);
+  --color-palevioletred-700: oklch(0.467 0.124 0.7);
+  --color-palevioletred-800: oklch(0.361 0.113 0.7);
+  --color-palevioletred-900: oklch(0.255 0.097 0.7);
+  --color-palevioletred-950: oklch(0.15 0.076 0.7);
+}
+
+/* Base typography scale — docs/design/design.md */
+@layer base {
+  body {
+    @apply bg-background text-foreground font-body text-base antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-heading;
+  }
+
+  /* Page title — primary color */
+  h1 {
+    @apply text-xl font-semibold text-rebeccapurple-500;
+  }
+
+  /* Section headers — accent color */
+  h4 {
+    @apply text-base font-medium uppercase tracking-wider text-darkcyan-500;
+  }
+}

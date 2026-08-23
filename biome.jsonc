@@ -1,0 +1,19 @@
+{
+  "extends": ["ultracite/biome/core", "ultracite/biome/svelte"],
+  "files": {
+    "includes": ["!docs"]
+  },
+  "overrides": [
+    {
+      "includes": ["src/app.d.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNamespace": "off"
+          }
+        }
+      }
+    }
+  ],
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json"
+}
