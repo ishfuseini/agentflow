@@ -9,15 +9,15 @@
 
 # 2. Agent Pipeline Core
 
-- [ ] 2.1 Define TypeScript types for each agent's output schema (QualifierOutput, ArchitectOutput, RiskCheckerOutput) matching the JSON schemas in `specs/agent-pipeline/spec.md`. Verify types compile with `npm run check`
-- [ ] 2.2 Create the Qualifier Agent prompt template and agent definition using `@openai/agents`. The prompt instructs the agent to extract structured requirements from a free-text pre-sales ask. Verify the agent definition imports and instantiates without error
-- [ ] 2.3 Create the Architect Agent prompt template and agent definition. The prompt instructs the agent to translate structured requirements into a deployment architecture + POC plan. Verify the agent definition imports and instantiates without error
-- [ ] 2.4 Create the Risk Checker Agent prompt template and agent definition. The prompt instructs the agent to evaluate the POC plan against a rubric with 7 scored dimensions. Verify the agent definition imports and instantiates without error
-- [ ] 2.5 Configure two model providers in the Agents SDK: Ollama Cloud (`gpt-oss:20b`) and OpenRouter (`claude-opus-4-8`). Verify both providers can be instantiated with their respective API keys from env vars
-- [ ] 2.6 Implement the routing toggle logic: cost mode (all agents → Ollama Cloud) vs. intelligence mode (Architect → OpenRouter, others → Ollama Cloud). Verify the routing function returns the correct provider for each agent in both modes
-- [ ] 2.7 Implement the sequential pipeline orchestrator (Qualifier → Architect → Risk Checker) using the Agents SDK, passing each agent's JSON output as the next agent's input. Verify the orchestrator function compiles and exports a `runPipeline(prompt, routingMode)` function
-- [ ] 2.8 Create the pipeline API endpoint (`POST /api/run`) that accepts `{ prompt, routingMode }` and triggers the pipeline. Verify `curl -X POST localhost:5173/api/run -d '{"prompt":"test","routingMode":"cost"}'` returns a structured response with all 3 agents' outputs
-- [ ] 2.9 Pre-load the 4 scenarios as prompt constants (Agency, Healthcare, Retail Lakehouse, FSI Governance). Verify the scenario constants match the `docs/mcp/Overview.md` demo scenarios and are importable from the pipeline module
+- [x] 2.1 Define TypeScript types for each agent's output schema (QualifierOutput, ArchitectOutput, RiskCheckerOutput) matching the JSON schemas in `specs/agent-pipeline/spec.md`. Verify types compile with `npm run check`
+- [x] 2.2 Create the Qualifier Agent prompt template and agent definition using `@openai/agents`. The prompt instructs the agent to extract structured requirements from a free-text pre-sales ask. Verify the agent definition imports and instantiates without error
+- [x] 2.3 Create the Architect Agent prompt template and agent definition. The prompt instructs the agent to translate structured requirements into a deployment architecture + POC plan. Verify the agent definition imports and instantiates without error
+- [x] 2.4 Create the Risk Checker Agent prompt template and agent definition. The prompt instructs the agent to evaluate the POC plan against a rubric with 7 scored dimensions. Verify the agent definition imports and instantiates without error
+- [x] 2.5 Configure two model providers in the Agents SDK: Ollama Cloud (`gpt-oss:20b`) and OpenRouter (`claude-opus-4-8`). Verify both providers can be instantiated with their respective API keys from env vars
+- [x] 2.6 Implement the routing toggle logic: cost mode (all agents → Ollama Cloud) vs. intelligence mode (Architect → OpenRouter, others → Ollama Cloud). Verify the routing function returns the correct provider for each agent in both modes
+- [x] 2.7 Implement the sequential pipeline orchestrator (Qualifier → Architect → Risk Checker) using the Agents SDK, passing each agent's JSON output as the next agent's input. Verify the orchestrator function compiles and exports a `runPipeline(prompt, routingMode)` function
+- [x] 2.8 Create the pipeline API endpoint (`POST /api/run`) that accepts `{ prompt, routingMode }` and triggers the pipeline. Verify `curl -X POST localhost:5173/api/run -d '{"prompt":"test","routingMode":"cost"}'` returns a structured response with all 3 agents' outputs
+- [x] 2.9 Pre-load the 4 scenarios as prompt constants (Agency, Healthcare, Retail Lakehouse, FSI Governance). Verify the scenario constants match the `docs/mcp/Overview.md` demo scenarios and are importable from the pipeline module
 
 # 3. MCP Tool Integration
 
