@@ -33,3 +33,6 @@ vite.config.ts.timestamp-*
 
 # Local MCP notes
 docs/MCP-OVERVIEW.md
+
+# Langfuse run exports (per-run debug artifacts, kept locally)
+docs/trace/
