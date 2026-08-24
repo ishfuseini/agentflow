@@ -4,6 +4,7 @@ import {
 	completePendingHitlRun,
 	getPendingHitlRun,
 } from "$lib/pipeline/hitl-state";
+import { parseJsonRequest } from "$lib/server/request";
 import type { RequestHandler } from "./$types";
 
 const ApproveRequestSchema = z.object({
@@ -11,19 +12,13 @@ const ApproveRequestSchema = z.object({
 });
 
 export const POST: RequestHandler = async ({ request }) => {
-	let body: unknown;
-	try {
-		body = await request.json();
-	} catch {
-		return json({ error: "Request body must be valid JSON" }, { status: 400 });
-	}
-
-	const parsed = ApproveRequestSchema.safeParse(body);
+	const parsed = await parseJsonRequest(
+		request,
+		ApproveRequestSchema,
+		'Expected body { "runId": string }',
+	);
 	if (!parsed.success) {
-		return json(
-			{ error: 'Expected body { "runId": string }' },
-			{ status: 400 },
-		);
+		return parsed.response;
 	}
 
 	const pending = await getPendingHitlRun(parsed.data.runId);
