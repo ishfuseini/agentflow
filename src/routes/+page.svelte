@@ -28,7 +28,7 @@
     ChatMessage,
     FinalPocOutputView,
     HitlCompletionResponse,
-    PipelineResponse,
+    PipelineView,
     TraceObservationRow,
     TraceTotals,
   } from "$lib/components/pipeline/types";
@@ -90,6 +90,16 @@
   let activeRunId = $state<string | null>(null);
   let editPlanOpen = $state(false);
   let editPlanText = $state("");
+  /**
+   * Output handed from one incremental step to the next. The riskChecker step
+   * sends all of it back so the server can assemble the run and open the gate.
+   */
+  let qualifierOutput: QualifierOutput | null = null;
+  let architectOutput: ArchitectOutput | null = null;
+  let runToolCalls: PipelineView["toolCalls"] = [];
+  /** The ask and customer domain for the run in flight, reused by every step. */
+  let activePrompt = "";
+  let activeDomain: string | undefined;
   let responseAppliedToken = $state(0);
   /** Gap between trace refreshes; each poll starts only after the last lands. */
   const TRACE_POLL_INTERVAL_MS = 1500;
@@ -356,15 +366,6 @@
     syncFlow();
   }
 
-  function setTraceStatus(
-    id: TraceSummaryRow["id"],
-    status: TraceSummaryRow["status"],
-  ): void {
-    traceRows = traceRows.map((row) =>
-      row.id === id ? { ...row, status } : row,
-    );
-  }
-
   function addMessage(role: ChatMessage["role"], text: string): void {
     messages = [...messages, { id: crypto.randomUUID(), role, text }];
   }
@@ -387,8 +388,18 @@
     activeRunId = null;
     editPlanOpen = false;
     editPlanText = "";
+    clearHandoffState();
     runToken += 1;
     responseAppliedToken = runToken;
+  }
+
+  function clearHandoffState(): void {
+    qualifierOutput = null;
+    architectOutput = null;
+    runToolCalls = [];
+    pendingAgent = null;
+    activePrompt = "";
+    activeDomain = undefined;
   }
 
   function resetRunVisuals(): void {
@@ -403,156 +414,223 @@
     activeRunId = null;
     editPlanOpen = false;
     editPlanText = "";
-  }
-
-  function wait(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    clearHandoffState();
   }
 
   function isCancelled(token: number): boolean {
     return responseAppliedToken === token || token !== runToken;
   }
 
+  const AGENT_LABELS: Record<string, string> = {
+    qualifier: "Requirements Agent",
+    architect: "Architect Agent",
+    riskChecker: "Risk Agent",
+  };
+
+  /** Order the orchestrator dispatches in; "hitl" ends the agent chain. */
+  const NEXT_AGENT: Record<AgentId, AgentId | null> = {
+    qualifier: "architect",
+    architect: "riskChecker",
+    riskChecker: "hitl",
+    hitl: null,
+    orchestrator: null,
+    mcpTools: null,
+  };
+
+  interface AgentStepResponse {
+    status: "agent-complete" | "paused" | "completed";
+    output: unknown;
+    toolCalls: PipelineView["toolCalls"];
+    gate?: {
+      proposedPlan: PocPlan;
+      highSeverityRisks: RiskCheckerOutput["risks"];
+      review_reason?: string;
+    };
+    finalOutput?: FinalPocOutputView;
+  }
+
   function startRunNarrative(token: number): void {
-    // Start with orchestrator, then auto-run first agent (no confirmation needed)
     updateAgent("orchestrator", { state: "running" });
-    addMessage("system", "🔄 Orchestrator starting pipeline...");
-    addMessage(
-      "system",
-      "→ Requirements Agent: Extracting structured requirements...",
-    );
-    // Auto-run the first agent
+    addMessage("system", "Orchestrator starting pipeline...");
+    // The first agent runs without a confirmation click; every later one waits.
     pendingAgent = "qualifier";
-    runState = "running";
-    // Trigger confirmation which will auto-run the first agent
+    runState = "awaiting-confirmation";
     confirmNextAgent().catch((error: unknown) => {
-      const message =
-        error instanceof Error ? error.message : "Pipeline failed.";
-      addMessage("system", message);
+      failRun(error, token);
     });
   }
 
+  function failRun(error: unknown, token: number): void {
+    if (isCancelled(token)) {
+      return;
+    }
+    stopTracePolling();
+    runState = "error";
+    pendingAgent = null;
+    addMessage(
+      "system",
+      error instanceof Error ? error.message : "Pipeline run failed.",
+    );
+  }
+
+  /**
+   * Runs one agent through the incremental /api/run endpoint. Throws on
+   * failure so the chain stops at the agent that broke instead of handing
+   * undefined to the next one.
+   */
   async function runAgentStep(
     agentId: AgentId,
     prompt: string,
     previousOutput: unknown,
-    token: number,
-  ): Promise<void> {
-    if (isCancelled(token)) {
-      return;
-    }
+  ): Promise<AgentStepResponse> {
     updateAgent(agentId, { state: "running" });
-    setTraceStatus(agentId, "running");
 
-    // Actually call the API to run this agent incrementally
-    try {
-      const response = await fetch("/api/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          routingMode,
-          agentId,
-          previousOutput,
-          domain: agentId === "architect" ? "pixated.agency" : undefined,
-          runId: activeRunId,
-        }),
-      });
-      const payload = (await response.json()) as
-        | { status: "agent-complete"; output: unknown; toolCalls: unknown[] }
-        | { error: string };
-      if (!response.ok || "error" in payload) {
-        throw new Error(
-          "error" in payload ? payload.error : "Agent run failed",
-        );
-      }
-      // Update node state and steps based on real results
-      updateAgent(agentId, { state: "done" });
-      setTraceStatus(agentId, "done");
-      // Mark all steps as done
-      const agent = agentNodes.find((n) => n.id === agentId);
-      if (agent?.steps) {
-        agent.steps.forEach((_, i) => updateAgentStep(agentId, i, "done"));
-      }
-      // Store the output for the next agent
-      if (agentId === "qualifier") {
-        (globalThis as any).__qualifierOutput = payload.output;
-      } else if (agentId === "architect") {
-        (globalThis as any).__architectOutput = payload.output;
-      }
-    } catch (error) {
+    const response = await fetch("/api/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        routingMode,
+        agentId,
+        previousOutput,
+        domain: activeDomain,
+        runId: activeRunId,
+        // Only the final step needs the accumulated run state.
+        ...(agentId === "riskChecker"
+          ? { qualifierOutput, priorToolCalls: runToolCalls }
+          : {}),
+      }),
+    });
+    const payload = (await response.json()) as
+      | AgentStepResponse
+      | { error: string };
+    if (!response.ok || "error" in payload) {
       updateAgent(agentId, { state: "warning" });
-      addMessage(
-        "system",
-        error instanceof Error ? error.message : "Agent run failed.",
-      );
+      throw new Error("error" in payload ? payload.error : "Agent run failed");
     }
+
+    updateAgent(agentId, { state: "done" });
+    const agent = agentNodes.find((node) => node.id === agentId);
+    if (agent?.steps) {
+      agent.steps.forEach((_, index) => {
+        updateAgentStep(agentId, index, "done");
+      });
+    }
+    runToolCalls = [...runToolCalls, ...payload.toolCalls];
+    return payload;
   }
 
+  /** Each agent takes the previous one's structured output as its input. */
+  function previousOutputFor(agentId: AgentId): unknown {
+    if (agentId === "architect") {
+      return qualifierOutput;
+    }
+    if (agentId === "riskChecker") {
+      return architectOutput;
+    }
+    return undefined;
+  }
+
+  /**
+   * Runs the pending agent, shows its result, then either parks on the next
+   * confirmation or opens the HITL gate. This is the whole orchestration loop
+   * the demo is meant to show, so each transition gets its own chat line.
+   */
   async function confirmNextAgent(): Promise<void> {
     if (!pendingAgent || runState !== "awaiting-confirmation" || !activeRunId) {
       return;
     }
     const agentId = pendingAgent;
+    const runId = activeRunId;
     pendingAgent = null;
     runState = "running";
     const token = runToken;
 
-    const labels: Record<string, string> = {
-      qualifier: "Requirements Agent",
-      architect: "Architect Agent",
-      riskChecker: "Risk Agent",
-    };
-    addMessage("system", `→ ${labels[agentId]}: Running...`);
+    addMessage("system", `Orchestrator → ${AGENT_LABELS[agentId]}: running...`);
 
-    // Get the original prompt from the first user message
-    const userPrompt = messages.find((m) => m.role === "user")?.text ?? "";
+    try {
+      const payload = await runAgentStep(
+        agentId,
+        activePrompt,
+        previousOutputFor(agentId),
+      );
+      if (isCancelled(token)) {
+        return;
+      }
 
-    // Get previous agent output for incremental execution
-    let previousOutput: unknown;
-    if (agentId === "architect") {
-      previousOutput = (globalThis as any).__qualifierOutput;
-    } else if (agentId === "riskChecker") {
-      previousOutput = (globalThis as any).__architectOutput;
-    }
+      if (agentId === "qualifier") {
+        qualifierOutput = payload.output as QualifierOutput;
+      } else if (agentId === "architect") {
+        architectOutput = payload.output as ArchitectOutput;
+        applyDiagram(architectOutput, runToolCalls);
+      }
 
-    await runAgentStep(agentId, userPrompt, previousOutput, token);
-    if (isCancelled(token)) {
-      return;
-    }
-    addMessage("system", `✓ ${labels[agentId]} complete`);
-
-    // Determine next agent
-    const nextAgent: Record<AgentId, AgentId | null> = {
-      qualifier: "architect",
-      architect: "riskChecker",
-      riskChecker: "hitl",
-      hitl: null,
-      orchestrator: null,
-      mcpTools: null,
-    };
-    const next = nextAgent[agentId];
-    if (!next) {
-      return;
-    }
-
-    if (next === "hitl") {
-      updateAgent("hitl", { state: "running" });
       addMessage(
         "system",
-        "⏸️ Pipeline paused at HITL Gate — awaiting your review",
+        formatAgentResult(
+          AGENT_LABELS[agentId],
+          payload.output as
+            | QualifierOutput
+            | ArchitectOutput
+            | RiskCheckerOutput,
+        ),
       );
-      runState = "paused";
-      updateAgent("orchestrator", { state: "done" });
+      await refreshTraceTable(runId);
+
+      const next = NEXT_AGENT[agentId];
+      if (next === "hitl") {
+        openHitlGate(payload);
+        return;
+      }
+      if (!next) {
+        return;
+      }
+
+      pendingAgent = next;
+      runState = "awaiting-confirmation";
+      addMessage(
+        "system",
+        `Ready to dispatch ${AGENT_LABELS[next]}. Confirm to continue.`,
+      );
+    } catch (error) {
+      failRun(error, token);
+    }
+  }
+
+  /**
+   * Final step landed. A paused run has a server-side pending HITL record that
+   * Approve/Edit resolve; a clean run skips the gate and finishes here.
+   */
+  function openHitlGate(payload: AgentStepResponse): void {
+    updateAgent("orchestrator", { state: "done" });
+
+    if (payload.status !== "paused" || !payload.gate) {
+      stopTracePolling();
+      updateAgent("hitl", { state: "done" });
+      runState = "completed";
+      finalOutput = payload.finalOutput ?? null;
+      addMessage(
+        "system",
+        "No high-severity risks found — the HITL gate was skipped. The POC plan is ready.",
+      );
       return;
     }
 
-    // Ask for confirmation before next agent
-    pendingAgent = next;
-    runState = "awaiting-confirmation";
+    const { gate } = payload;
+    updateAgent("hitl", {
+      state: "paused",
+      proposedPlan: gate.proposedPlan,
+      reviewReason: gate.review_reason,
+      riskSummary: gate.highSeverityRisks,
+    });
+    if (gate.highSeverityRisks.length > 0) {
+      updateAgent("riskChecker", { state: "warning" });
+    }
+    editPlanText = JSON.stringify(gate.proposedPlan, null, 2);
+    runState = "paused";
     addMessage(
       "system",
-      `⏸️ Ready to run ${labels[next]}. Confirm to continue.`,
+      "Pipeline paused at the HITL gate — approve or edit the POC plan to continue.",
     );
   }
 
@@ -711,22 +789,27 @@
    * from arch_pattern_lookup, header brand from brand_context_lookup. A
    * low-confidence pattern match carries no diagram_data and renders none.
    */
-  function applyDiagram(pipeline: PipelineResponse["pipeline"]): void {
-    const source = diagramSourceFromToolCalls(pipeline.toolCalls);
+  function applyDiagram(
+    architect: ArchitectOutput,
+    toolCalls: PipelineView["toolCalls"],
+  ): void {
+    const source = diagramSourceFromToolCalls(toolCalls);
     diagramUnavailable = source.unavailable;
     diagramHtml = source.diagram
       ? renderDiagramHtml({
           diagram: source.diagram,
           brand: source.brand,
-          fallbackTitle: pipeline.architect.pattern_match.pattern_id.replace(
-            /_/g,
-            " ",
-          ),
-          subtitle: pipeline.architect.architecture_summary,
+          fallbackTitle: architect.pattern_match.pattern_id.replace(/_/g, " "),
+          subtitle: architect.architecture_summary,
         })
       : null;
   }
 
+  /**
+   * Renders an agent's structured output as a chat bubble. Fields must match
+   * the zod schemas in $lib/agents/types — the chat panel prints plain text,
+   * so no markdown markers here.
+   */
   function formatAgentResult(
     agentName: string,
     output: QualifierOutput | ArchitectOutput | RiskCheckerOutput,
@@ -734,122 +817,67 @@
     if (agentName === "Requirements Agent") {
       const qualifier = output as QualifierOutput;
       return [
-        `**${agentName} Results:**`,
+        `${agentName} — structured requirements`,
         "",
-        `**Industry:** ${qualifier.industry}`,
-        `**Data Stack:** ${qualifier.data_stack.join(", ")}`,
-        `**Cloud:** ${qualifier.cloud}`,
-        `**Constraints:** ${qualifier.constraints.join(", ")}`,
-        `**Latency:** ${qualifier.latency}`,
-        "",
-        "**Extracted Requirements:**",
-        ...qualifier.requirements.map((req) => `- ${req}`),
+        "Use cases:",
+        ...qualifier.named_use_cases.map((item) => `  • ${item}`),
+        "Constraints:",
+        ...qualifier.partner_constraints.map((item) => `  • ${item}`),
+        "Success criteria:",
+        ...qualifier.success_criteria.map((item) => `  • ${item}`),
+        "Exit criteria:",
+        ...qualifier.exit_criteria.map((item) => `  • ${item}`),
+        ...(qualifier.ambiguity_flags.length > 0
+          ? [
+              "Needs clarification:",
+              ...qualifier.ambiguity_flags.map((item) => `  • ${item}`),
+            ]
+          : []),
       ].join("\n");
     }
     if (agentName === "Architect Agent") {
       const architect = output as ArchitectOutput;
       return [
-        `**${agentName} Results:**`,
+        `${agentName} — deployment architecture`,
         "",
-        `**Architecture Summary:** ${architect.architecture_summary}`,
+        architect.architecture_summary,
         "",
-        "**Recommended Components:**",
-        ...architect.recommended_components.map((comp) => `- ${comp}`),
+        `Pattern: ${architect.pattern_match.pattern_id} (confidence ${architect.pattern_match.confidence.toFixed(2)})`,
         "",
-        "**Data Zones:**",
-        ...architect.data_zones.map((zone) => `- ${zone}`),
+        `Scope: ${architect.poc_plan.scope}`,
+        `Timeline: ${architect.poc_plan.timeline}`,
+        `Resourcing: ${architect.poc_plan.resource_estimate}`,
+        "Data zones:",
+        ...architect.poc_plan.data_zones.map((zone) => `  • ${zone}`),
+        "Integrations:",
+        ...architect.poc_plan.integrations.map((item) => `  • ${item}`),
         "",
-        "**Integration Notes:**",
-        ...architect.integration_notes.map((note) => `- ${note}`),
+        `Deployment notes: ${architect.deployment_notes}`,
       ].join("\n");
     }
     if (agentName === "Risk Agent") {
       const riskChecker = output as RiskCheckerOutput;
       return [
-        `**${agentName} Results:**`,
+        `${agentName} — risk and controls review`,
         "",
-        `**Overall Score:** ${riskChecker.overall_score.toFixed(1)}/5`,
-        `**Recommendation:** ${riskChecker.recommendation}`,
+        `Overall score: ${riskChecker.overall_score.toFixed(1)}/5`,
+        `Recommendation: ${riskChecker.recommendation}`,
         "",
-        "**Risks:**",
+        "Risks:",
         ...riskChecker.risks.map(
-          (risk) =>
-            `- [${risk.severity.toUpperCase()}] ${risk.name}: ${risk.description}`,
+          (risk) => `  • [${risk.severity.toUpperCase()}] ${risk.issue}`,
         ),
       ].join("\n");
     }
-    return `**${agentName} Results:** ${JSON.stringify(output, null, 2)}`;
+    return `${agentName} results: ${JSON.stringify(output, null, 2)}`;
   }
 
-  function applyPipelineData(response: PipelineResponse): void {
-    responseAppliedToken = runToken;
-    activeRunId = response.runId;
-    applyDiagram(response.pipeline);
-    void refreshTraceTable(response.runId);
-    const highSeverityRisks =
-      response.gate?.highSeverityRisks ??
-      response.pipeline.riskChecker.risks.filter(
-        (risk) => risk.severity === "high",
-      );
-    agentNodes = createInitialAgentNodes().map((node) => {
-      if (node.id === "qualifier" || node.id === "architect") {
-        return { ...node, state: "done" };
-      }
-      if (node.id === "riskChecker") {
-        return {
-          ...node,
-          state: highSeverityRisks.length > 0 ? "warning" : "done",
-        };
-      }
-      return {
-        ...node,
-        state: response.status === "paused" ? "paused" : "done",
-        proposedPlan:
-          response.gate?.proposedPlan ?? response.pipeline.architect.poc_plan,
-        reviewReason: response.gate?.review_reason,
-        riskSummary: highSeverityRisks,
-      };
-    });
-    syncFlow();
-    if (response.status === "paused") {
-      runState = "paused";
-      addMessage(
-        "system",
-        formatAgentResult("Requirements Agent", response.pipeline.qualifier),
-      );
-      addMessage(
-        "system",
-        formatAgentResult("Architect Agent", response.pipeline.architect),
-      );
-      addMessage(
-        "system",
-        formatAgentResult("Risk Agent", response.pipeline.riskChecker),
-      );
-      addMessage(
-        "system",
-        "Human review required. Approve or edit the POC plan in the HITL Gate node.",
-      );
-      editPlanText = JSON.stringify(response.gate?.proposedPlan, null, 2);
-      return;
-    }
-    runState = "completed";
-    finalOutput = response.finalOutput ?? null;
-    addMessage(
-      "system",
-      formatAgentResult("Requirements Agent", response.pipeline.qualifier),
-    );
-    addMessage(
-      "system",
-      formatAgentResult("Architect Agent", response.pipeline.architect),
-    );
-    addMessage(
-      "system",
-      formatAgentResult("Risk Agent", response.pipeline.riskChecker),
-    );
-    addMessage("system", "Pipeline completed. The draft POC plan is ready.");
-  }
-
-  async function runPipeline(prompt: string, domain?: string): Promise<void> {
+  /**
+   * Starts a run. The orchestrator dispatches the first agent immediately and
+   * then waits for a confirmation click before each subsequent one, so the
+   * hand-off between agents is visible rather than hidden inside one request.
+   */
+  function runPipeline(prompt: string, domain?: string): void {
     if (isInteractionLocked) {
       return;
     }
@@ -858,38 +886,13 @@
     addMessage("user", prompt);
     addMessage("system", `Running pipeline in ${routingMode} mode.`);
     runToken += 1;
-    const token = runToken;
     responseAppliedToken = 0;
+    activePrompt = prompt;
+    activeDomain = domain;
     const runId = crypto.randomUUID();
     activeRunId = runId;
     startTracePolling(runId);
-    startRunNarrative(token);
-    try {
-      const response = await fetch("/api/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt, routingMode, domain, runId }),
-      });
-      const payload = (await response.json()) as
-        | PipelineResponse
-        | { error: string };
-      if (!response.ok || "error" in payload) {
-        throw new Error(
-          "error" in payload ? payload.error : "Pipeline run failed",
-        );
-      }
-      applyPipelineData(payload);
-      stopTracePolling();
-    } catch (error) {
-      stopTracePolling();
-      responseAppliedToken = token;
-      runState = "error";
-      updateAgent("qualifier", { state: "warning" });
-      addMessage(
-        "system",
-        error instanceof Error ? error.message : "Pipeline run failed.",
-      );
-    }
+    startRunNarrative(runToken);
   }
 
   function openEditPlan(): void {
