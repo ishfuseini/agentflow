@@ -32,12 +32,12 @@
 
 # 4. HITL Gate
 
-- [ ] 4.1 Implement the pipeline pause/resume state machine: after Risk Checker completes, pipeline pauses and holds state server-side. Verify the pipeline API endpoint returns a "paused" status with the HITL gate data (risks, POC plan, review_reason) when HITL is triggered
-- [ ] 4.2 Implement HITL trigger logic: gate triggers when `risk_policy_lookup` returns `hitl_required=true` OR Risk Checker flags any high-severity risk. Verify the trigger logic evaluates both conditions correctly
-- [ ] 4.3 Implement the approve action (`POST /api/hitl/approve`): pipeline resumes and produces final output using the agent-produced plan unchanged. Verify approving the gate returns the final structured POC plan
-- [ ] 4.4 Implement the edit action (`POST /api/hitl/edit`): user submits modified POC plan JSON, modified plan becomes final output. Verify editing the gate returns the modified plan as final output
-- [ ] 4.5 Log the HITL decision to Langfuse as an eval-able event, including decision type (approve/edit), human latency (time from gate display to action), and diff (when edited). Verify the HITL event appears in Langfuse traces with decision and latency
-- [ ] 4.6 Verify HITL gate fires for the Healthcare scenario (PHI → hitl_required=true from risk_policy_lookup) and the FSI Governance scenario (regulated financial data → hitl_required=true), and the gate displays the review_reason and high-severity risks for both
+- [x] 4.1 Implement the pipeline pause/resume state machine: after Risk Checker completes, pipeline pauses and holds state server-side. Verify the pipeline API endpoint returns a "paused" status with the HITL gate data (risks, POC plan, review_reason) when HITL is triggered
+- [x] 4.2 Implement HITL trigger logic: gate triggers when `risk_policy_lookup` returns `hitl_required=true` OR Risk Checker flags any high-severity risk. Verify the trigger logic evaluates both conditions correctly
+- [x] 4.3 Implement the approve action (`POST /api/hitl/approve`): pipeline resumes and produces final output using the agent-produced plan unchanged. Verify approving the gate returns the final structured POC plan
+- [x] 4.4 Implement the edit action (`POST /api/hitl/edit`): user submits modified POC plan JSON, modified plan becomes final output. Verify editing the gate returns the modified plan as final output
+- [x] 4.5 Log the HITL decision to Langfuse as an eval-able event, including decision type (approve/edit), human latency (time from gate display to action), and diff (when edited). Verify the HITL event appears in Langfuse traces with decision and latency
+- [x] 4.6 Verify HITL gate fires for the Healthcare scenario (PHI → hitl_required=true from risk_policy_lookup) and the FSI Governance scenario (regulated financial data → hitl_required=true), and the gate displays the review_reason and high-severity risks for both
 
 # 5. Langfuse Tracing
 
