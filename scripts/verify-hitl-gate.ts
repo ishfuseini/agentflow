@@ -65,7 +65,7 @@ async function postJson<T>(
 		throw new Error(`Unauthorized test path: ${path}`);
 	}
 
-	const response = await fetch(`${APP_URL}${path}`, {
+	const response = await fetch(new URL(path, APP_URL), {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(body),
