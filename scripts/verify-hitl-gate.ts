@@ -8,6 +8,11 @@
 import { getScenario } from "../src/lib/pipeline/scenarios.ts";
 
 const APP_URL = process.env.AGENTFLOW_APP_URL ?? "http://localhost:5173";
+const ALLOWED_PATHS = new Set([
+	"/api/run",
+	"/api/hitl/approve",
+	"/api/hitl/edit",
+]);
 
 interface RunPausedResponse {
 	status: "paused";
@@ -21,7 +26,7 @@ interface RunPausedResponse {
 			resource_estimate: string;
 		};
 		highSeverityRisks: Array<{ severity: string; issue: string }>;
-		reviewReason?: string;
+		review_reason?: string;
 		riskPolicy: {
 			hitl_required?: boolean;
 			review_reason?: string;
@@ -55,6 +60,10 @@ async function postJson<T>(
 	path: string,
 	body: Record<string, unknown>,
 ): Promise<T> {
+	if (!ALLOWED_PATHS.has(path)) {
+		throw new Error(`Unauthorized test path: ${path}`);
+	}
+
 	const response = await fetch(`${APP_URL}${path}`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -92,9 +101,9 @@ async function runScenario(
 		`${scenario.name} risk_policy_lookup returned hitl_required=true`,
 	);
 	expect(
-		typeof result.gate.reviewReason === "string" &&
-			result.gate.reviewReason.length > 0,
-		`${scenario.name} gate includes reviewReason`,
+		typeof result.gate.review_reason === "string" &&
+			result.gate.review_reason.length > 0,
+		`${scenario.name} gate includes review_reason`,
 	);
 	expect(
 		result.gate.highSeverityRisks.length > 0,

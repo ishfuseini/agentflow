@@ -12,19 +12,26 @@ export interface HitlDecisionLogInput {
 	diff: JsonDiffEntry[];
 }
 
-function createLangfuseClient(): Langfuse {
+let langfuseClient: Langfuse | undefined;
+
+function getLangfuseClient(): Langfuse {
+	if (langfuseClient) {
+		return langfuseClient;
+	}
+
 	if (!(env.LANGFUSE_PUBLIC_KEY && env.LANGFUSE_SECRET_KEY)) {
 		throw new Error(
 			"LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are required to log HITL decisions.",
 		);
 	}
 
-	return new Langfuse({
+	langfuseClient = new Langfuse({
 		publicKey: env.LANGFUSE_PUBLIC_KEY,
 		secretKey: env.LANGFUSE_SECRET_KEY,
 		baseUrl: env.LANGFUSE_BASE_URL,
 		flushAt: 1,
 	});
+	return langfuseClient;
 }
 
 export async function logHitlDecision({
@@ -35,7 +42,7 @@ export async function logHitlDecision({
 	finalPlan,
 	diff,
 }: HitlDecisionLogInput): Promise<void> {
-	const client = createLangfuseClient();
+	const client = getLangfuseClient();
 	const trace = client.trace({
 		name: "agentflow.hitl_decision",
 		sessionId: runId,

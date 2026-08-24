@@ -17,6 +17,7 @@ export interface PendingHitlRun {
 	gate: HitlGateData;
 	createdAt: string;
 	gateDisplayedAt: string;
+	expiresAt: string;
 }
 
 export interface CompletedHitlRun {
@@ -30,21 +31,38 @@ export interface CompletedHitlRun {
 }
 
 const pendingRuns = new Map<string, PendingHitlRun>();
+const PENDING_RUN_TTL_MS = 30 * 60 * 1000;
 
-export function createPendingHitlRun(pipeline: PipelineResult): PendingHitlRun {
-	const now = new Date().toISOString();
+function cleanupExpiredPendingRuns(now = Date.now()): void {
+	for (const [runId, run] of pendingRuns) {
+		if (new Date(run.expiresAt).getTime() <= now) {
+			pendingRuns.delete(runId);
+		}
+	}
+}
+
+export function createPendingHitlRun(
+	pipeline: PipelineResult,
+	runId = crypto.randomUUID(),
+): PendingHitlRun {
+	cleanupExpiredPendingRuns();
+
+	const nowMs = Date.now();
+	const now = new Date(nowMs).toISOString();
 	const run: PendingHitlRun = {
-		runId: crypto.randomUUID(),
+		runId,
 		pipeline,
 		gate: buildHitlGateData(pipeline),
 		createdAt: now,
 		gateDisplayedAt: now,
+		expiresAt: new Date(nowMs + PENDING_RUN_TTL_MS).toISOString(),
 	};
 	pendingRuns.set(run.runId, run);
 	return run;
 }
 
 export function getPendingHitlRun(runId: string): PendingHitlRun | undefined {
+	cleanupExpiredPendingRuns();
 	return pendingRuns.get(runId);
 }
 

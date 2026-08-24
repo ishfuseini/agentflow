@@ -45,8 +45,9 @@ export const POST: RequestHandler = async ({ request }) => {
 			runRequest.routingMode,
 			runRequest.domain,
 		);
+		const runId = crypto.randomUUID();
 		if (shouldPauseForHitl(result)) {
-			const pending = createPendingHitlRun(result);
+			const pending = createPendingHitlRun(result, runId);
 			return json({
 				status: "paused",
 				runId: pending.runId,
@@ -57,7 +58,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		return json({
 			status: "completed",
-			runId: crypto.randomUUID(),
+			runId,
 			finalOutput: buildFinalPocOutput(result, result.architect.poc_plan),
 			pipeline: result,
 		});

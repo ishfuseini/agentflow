@@ -14,7 +14,7 @@ export interface RiskPolicyResult {
 export interface HitlGateData {
 	proposedPlan: PocPlan;
 	highSeverityRisks: PipelineResult["riskChecker"]["risks"];
-	reviewReason?: string;
+	review_reason?: string;
 	riskPolicy: RiskPolicyResult | null;
 }
 
@@ -51,35 +51,40 @@ function parseJsonString(value: string): unknown {
 	}
 }
 
+function getTextBlockValue(block: unknown): string | undefined {
+	if (
+		isRecord(block) &&
+		block.type === "text" &&
+		typeof block.text === "string"
+	) {
+		return block.text;
+	}
+	return undefined;
+}
+
+function extractJsonFromBlocks(
+	blocks: readonly unknown[],
+): unknown | undefined {
+	const text = blocks.map(getTextBlockValue).find(Boolean);
+	return text ? parseJsonString(text) : undefined;
+}
+
 function normalizeToolResult(value: unknown): unknown {
 	if (typeof value === "string") {
 		return parseJsonString(value);
 	}
 
 	if (Array.isArray(value)) {
-		const textBlock = value.find(
-			(block) => isRecord(block) && block.type === "text",
-		);
-		if (isRecord(textBlock) && typeof textBlock.text === "string") {
-			return parseJsonString(textBlock.text);
-		}
+		return extractJsonFromBlocks(value) ?? value;
 	}
 
-	if (
-		isRecord(value) &&
-		value.type === "text" &&
-		typeof value.text === "string"
-	) {
-		return parseJsonString(value.text);
+	const text = getTextBlockValue(value);
+	if (text) {
+		return parseJsonString(text);
 	}
 
 	if (isRecord(value) && Array.isArray(value.content)) {
-		const textBlock = value.content.find(
-			(block) => isRecord(block) && block.type === "text",
-		);
-		if (isRecord(textBlock) && typeof textBlock.text === "string") {
-			return parseJsonString(textBlock.text);
-		}
+		return extractJsonFromBlocks(value.content) ?? value;
 	}
 
 	return value;
@@ -110,7 +115,7 @@ export function buildHitlGateData(result: PipelineResult): HitlGateData {
 		proposedPlan: result.architect.poc_plan,
 		highSeverityRisks,
 		...(riskPolicy?.review_reason
-			? { reviewReason: riskPolicy.review_reason }
+			? { review_reason: riskPolicy.review_reason }
 			: {}),
 		riskPolicy,
 	};
