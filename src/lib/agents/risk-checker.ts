@@ -7,13 +7,13 @@ import {
 import { RiskCheckerOutputSchema } from "./types";
 
 /**
- * Risk Checker Agent prompt template.
+ * Risk Agent prompt template.
  *
  * Calls the agentflow-mcp risk_policy_lookup tool before evaluating, so the
  * rubric is grounded in curated risk/governance checks — see the
  * mcp-tool-integration spec for the tool contract.
  */
-export const RISK_CHECKER_INSTRUCTIONS = `You are the Risk Checker Agent in a pre-sales POC qualification pipeline. You receive the JSON output of the Architect Agent — a deployment architecture and POC plan — and evaluate it against a fixed rubric. You evaluate; you do not redesign.
+export const RISK_CHECKER_INSTRUCTIONS = `You are the Risk Agent in a pre-sales POC qualification pipeline. You receive the JSON output of the Architect Agent — a deployment architecture and POC plan — and evaluate it against a fixed rubric. You evaluate; you do not redesign.
 
 Step 0 — Before scoring, call the risk_policy_lookup tool. Derive its arguments from the requirements and the plan:
 - "industry": the industry as a snake_case slug (e.g. "healthcare", "financial_services", "retail", "media_agency")
@@ -49,7 +49,7 @@ Respond with a single JSON object with exactly this shape:
 {"eval_scores": {"use_case_clarity": number, "success_criteria_specificity": number, "exit_criteria_present": number, "timeline_realism": number, "governance_coverage": number, "data_zone_design": number, "resource_feasibility": number}, "overall_score": number, "risks": [{"severity": "high" | "medium" | "low", "issue": string}], "recommendation": string}`;
 
 /**
- * Creates the Risk Checker Agent. The model is injected per run by the routing
+ * Creates the Risk Agent. The model is injected per run by the routing
  * layer; `mcpServer` is an agentflow-mcp connection already filtered to
  * risk_policy_lookup (connected by the orchestrator).
  */
@@ -58,7 +58,7 @@ export function createRiskCheckerAgent(
 	mcpServer: MCPServer,
 ): Agent<UnknownContext, typeof RiskCheckerOutputSchema> {
 	return new Agent({
-		name: "Risk Checker",
+		name: "Risk Agent",
 		handoffDescription:
 			"Evaluates the POC plan against a 7-dimension rubric and flags risks.",
 		instructions: RISK_CHECKER_INSTRUCTIONS,

@@ -11,7 +11,12 @@
     SvelteFlow,
   } from "@xyflow/svelte";
   import { onDestroy, onMount } from "svelte";
-  import type { PocPlan } from "$lib/agents/types";
+  import type {
+    ArchitectOutput,
+    PocPlan,
+    QualifierOutput,
+    RiskCheckerOutput,
+  } from "$lib/agents/types";
   import AgentNodeCard from "$lib/components/pipeline/agent-node-card.svelte";
   import ChatPanel from "$lib/components/pipeline/chat-panel.svelte";
   import ConnectorEdge from "$lib/components/pipeline/connector-edge.svelte";
@@ -24,7 +29,7 @@
     FinalPocOutputView,
     HitlCompletionResponse,
     PipelineResponse,
-    TraceSummaryRow,
+    TraceObservationRow,
     TraceTotals,
   } from "$lib/components/pipeline/types";
   import {
@@ -42,20 +47,29 @@
     connector: ConnectorEdge,
   };
   /**
-   * Node row centered on the origin so the group sits mid-canvas; `fitView`
-   * then centers it in the viewport on init. Offsets account for the wider
-   * HITL card (220px) while keeping an even 20px gap between cards.
+   * Top-down flow: HITL (user) at top, Orchestrator below,
+   * agents in horizontal row, MCP Tools at bottom (called by agents).
+   * Clear top-to-bottom flow matching the architecture diagram.
+   * `fitView` centers the group in the viewport on init.
    */
   const nodePositions: Record<AgentId, { x: number; y: number }> = {
-    qualifier: { x: -320, y: 0 },
-    architect: { x: -120, y: 0 },
-    riskChecker: { x: 80, y: 0 },
-    hitl: { x: 300, y: 0 },
+    hitl: { x: 0, y: -200 },
+    orchestrator: { x: 0, y: -50 },
+    qualifier: { x: -200, y: 100 },
+    architect: { x: 0, y: 100 },
+    riskChecker: { x: 200, y: 100 },
+    mcpTools: { x: 0, y: 250 },
   };
 
   let routingMode: RoutingMode = $state("cost");
-  let runState: "idle" | "running" | "paused" | "completed" | "error" =
-    $state("idle");
+  let runState:
+    | "idle"
+    | "running"
+    | "paused"
+    | "awaiting-confirmation"
+    | "completed"
+    | "error" = $state("idle");
+  let pendingAgent: AgentId | null = $state(null);
   let messages = $state<ChatMessage[]>([]);
   const initialAgentNodes = createInitialAgentNodes();
   let agentNodes = $state.raw<AgentNodeData[]>(initialAgentNodes);
@@ -63,7 +77,7 @@
     buildFlowNodes(initialAgentNodes),
   );
   let edges = $state.raw<Edge[]>(buildFlowEdges(initialAgentNodes));
-  let traceRows = $state<TraceSummaryRow[]>(createInitialTraceRows());
+  let traceRows = $state<TraceObservationRow[]>(createInitialTraceRows());
   let traceTotals = $state<TraceTotals>({
     latency: "--",
     tokens: "--",
@@ -84,7 +98,9 @@
   let tracePollActive = false;
 
   const isInteractionLocked = $derived(
-    runState === "running" || runState === "paused",
+    runState === "running" ||
+      runState === "paused" ||
+      runState === "awaiting-confirmation",
   );
   onMount(() => {
     const handleApprove = (): void => {
@@ -114,22 +130,77 @@
   function createInitialAgentNodes(): AgentNodeData[] {
     return [
       {
+        id: "orchestrator",
+        label: "Orchestrator",
+        subtitle: "Dispatches and coordinates agents",
+        state: "idle",
+      },
+      {
         id: "qualifier",
-        label: "Qualifier",
+        label: "Requirements Agent",
         subtitle: "Extract structured requirements",
         state: "idle",
+        steps: [
+          {
+            id: "extract",
+            label: "extract_requirements",
+            status: "pending",
+          },
+        ],
+        currentStep: 0,
       },
       {
         id: "architect",
-        label: "Architect",
+        label: "Architect Agent",
         subtitle: "Design deployment and POC plan",
         state: "idle",
+        steps: [
+          {
+            id: "arch_pattern",
+            label: "arch_pattern_lookup",
+            status: "pending",
+          },
+          {
+            id: "tool_selection",
+            label: "tool_selection_lookup",
+            status: "pending",
+          },
+          {
+            id: "brand_context",
+            label: "brand_context_lookup",
+            status: "pending",
+          },
+          {
+            id: "synthesize",
+            label: "synthesize_plan",
+            status: "pending",
+          },
+        ],
+        currentStep: 0,
       },
       {
         id: "riskChecker",
-        label: "Risk Checker",
+        label: "Risk Agent",
         subtitle: "Evaluate controls and risks",
         state: "idle",
+        steps: [
+          {
+            id: "risk_policy",
+            label: "risk_policy_lookup",
+            status: "pending",
+          },
+          {
+            id: "evaluate",
+            label: "evaluate_rubric",
+            status: "pending",
+          },
+          {
+            id: "assess",
+            label: "produce_assessment",
+            status: "pending",
+          },
+        ],
+        currentStep: 0,
       },
       {
         id: "hitl",
@@ -137,39 +208,18 @@
         subtitle: "Human approval checkpoint",
         state: "idle",
       },
+      {
+        id: "mcpTools",
+        label: "MCP Tools",
+        subtitle:
+          "Architecture patterns, tool selection, brand context, risk policies",
+        state: "idle",
+      },
     ];
   }
 
-  function createInitialTraceRows(): TraceSummaryRow[] {
-    return [
-      {
-        id: "qualifier",
-        label: "Qualifier",
-        status: "pending",
-        latency: "--",
-        tokens: "--",
-        cost: "--",
-        eval: "--",
-      },
-      {
-        id: "architect",
-        label: "Architect",
-        status: "pending",
-        latency: "--",
-        tokens: "--",
-        cost: "--",
-        eval: "--",
-      },
-      {
-        id: "riskChecker",
-        label: "Risk Checker",
-        status: "pending",
-        latency: "--",
-        tokens: "--",
-        cost: "--",
-        eval: "--",
-      },
-    ];
+  function createInitialTraceRows(): TraceObservationRow[] {
+    return [];
   }
 
   function buildFlowNodes(source: AgentNodeData[]): Node<AgentNodeData>[] {
@@ -185,11 +235,18 @@
 
   function buildFlowEdges(source: AgentNodeData[]): Edge[] {
     const stateById = new Map(source.map((node) => [node.id, node.state]));
-    return [
-      buildEdge("qualifier", "architect", stateById),
-      buildEdge("architect", "riskChecker", stateById),
-      buildEdge("riskChecker", "hitl", stateById),
+    const edges: Edge[] = [
+      // HITL → Orchestrator (user initiates)
+      buildEdge("hitl", "orchestrator", stateById),
+      // Orchestrator dispatch edges (one-way, top-to-bottom, agents only)
+      buildDispatchEdge("orchestrator", "qualifier", 1, stateById),
+      buildDispatchEdge("orchestrator", "architect", 2, stateById),
+      buildDispatchEdge("orchestrator", "riskChecker", 3, stateById),
+      // MCP gateway edges (from Architect and Risk Checker to MCP)
+      buildMcpEdge("architect", "mcpTools", stateById),
+      buildMcpEdge("riskChecker", "mcpTools", stateById),
     ];
+    return edges;
   }
 
   function buildEdge(
@@ -211,6 +268,54 @@
     };
   }
 
+  function buildDispatchEdge(
+    source: AgentId,
+    target: AgentId,
+    _number: number,
+    stateById: Map<AgentId, AgentNodeState>,
+  ): Edge {
+    // Only active if the target agent is currently running
+    const active = stateById.get(target) === "running";
+    return {
+      id: `${source}-${target}-dispatch`,
+      source,
+      target,
+      type: "connector",
+      data: { active },
+    };
+  }
+
+  function buildReturnEdge(
+    source: AgentId,
+    target: AgentId,
+    stateById: Map<AgentId, AgentNodeState>,
+  ): Edge {
+    const active = stateById.get(source) === "done";
+    return {
+      id: `${source}-${target}-return`,
+      source,
+      target,
+      type: "connector",
+      data: { active, dashed: true },
+    };
+  }
+
+  function buildMcpEdge(
+    source: AgentId,
+    target: AgentId,
+    stateById: Map<AgentId, AgentNodeState>,
+  ): Edge {
+    // Only active while the source agent is running (making tool calls)
+    const active = stateById.get(source) === "running";
+    return {
+      id: `${source}-${target}-mcp`,
+      source,
+      target,
+      type: "connector",
+      data: { active, dashed: true, mcp: true },
+    };
+  }
+
   function syncFlow(): void {
     nodes = buildFlowNodes(agentNodes);
     edges = buildFlowEdges(agentNodes);
@@ -223,6 +328,31 @@
     agentNodes = agentNodes.map((node) =>
       node.id === id ? { ...node, ...update } : node,
     );
+    syncFlow();
+  }
+
+  function updateAgentStep(
+    agentId: AgentId,
+    stepIndex: number,
+    status: "running" | "done",
+    detail?: string,
+  ): void {
+    agentNodes = agentNodes.map((node) => {
+      if (node.id !== agentId || !node.steps) {
+        return node;
+      }
+      const updatedSteps = node.steps.map((step, i) => {
+        if (i === stepIndex) {
+          return { ...step, status, detail };
+        }
+        return step;
+      });
+      return {
+        ...node,
+        steps: updatedSteps,
+        currentStep: status === "done" ? stepIndex + 1 : stepIndex,
+      };
+    });
     syncFlow();
   }
 
@@ -284,89 +414,230 @@
   }
 
   function startRunNarrative(token: number): void {
-    playRunNarrative(token).catch((error: unknown) => {
-      if (isCancelled(token)) {
-        return;
-      }
+    // Start with orchestrator, then auto-run first agent (no confirmation needed)
+    updateAgent("orchestrator", { state: "running" });
+    addMessage("system", "🔄 Orchestrator starting pipeline...");
+    addMessage(
+      "system",
+      "→ Requirements Agent: Extracting structured requirements...",
+    );
+    // Auto-run the first agent
+    pendingAgent = "qualifier";
+    runState = "running";
+    // Trigger confirmation which will auto-run the first agent
+    confirmNextAgent().catch((error: unknown) => {
       const message =
-        error instanceof Error ? error.message : "Pipeline animation failed.";
+        error instanceof Error ? error.message : "Pipeline failed.";
       addMessage("system", message);
     });
   }
 
-  async function playRunNarrative(token: number): Promise<void> {
-    updateAgent("qualifier", { state: "running" });
-    setTraceStatus("qualifier", "running");
-    await wait(900);
+  async function runAgentStep(
+    agentId: AgentId,
+    prompt: string,
+    previousOutput: unknown,
+    token: number,
+  ): Promise<void> {
     if (isCancelled(token)) {
       return;
     }
-    updateAgent("qualifier", { state: "done" });
-    setTraceStatus("qualifier", "done");
+    updateAgent(agentId, { state: "running" });
+    setTraceStatus(agentId, "running");
 
-    updateAgent("architect", { state: "running" });
-    setTraceStatus("architect", "running");
-    await wait(1500);
-    if (isCancelled(token)) {
-      return;
+    // Actually call the API to run this agent incrementally
+    try {
+      const response = await fetch("/api/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          routingMode,
+          agentId,
+          previousOutput,
+          domain: agentId === "architect" ? "pixated.agency" : undefined,
+          runId: activeRunId,
+        }),
+      });
+      const payload = (await response.json()) as
+        | { status: "agent-complete"; output: unknown; toolCalls: unknown[] }
+        | { error: string };
+      if (!response.ok || "error" in payload) {
+        throw new Error(
+          "error" in payload ? payload.error : "Agent run failed",
+        );
+      }
+      // Update node state and steps based on real results
+      updateAgent(agentId, { state: "done" });
+      setTraceStatus(agentId, "done");
+      // Mark all steps as done
+      const agent = agentNodes.find((n) => n.id === agentId);
+      if (agent?.steps) {
+        agent.steps.forEach((_, i) => updateAgentStep(agentId, i, "done"));
+      }
+      // Store the output for the next agent
+      if (agentId === "qualifier") {
+        (globalThis as any).__qualifierOutput = payload.output;
+      } else if (agentId === "architect") {
+        (globalThis as any).__architectOutput = payload.output;
+      }
+    } catch (error) {
+      updateAgent(agentId, { state: "warning" });
+      addMessage(
+        "system",
+        error instanceof Error ? error.message : "Agent run failed.",
+      );
     }
-    updateAgent("architect", { state: "done" });
-    setTraceStatus("architect", "done");
+  }
 
-    updateAgent("riskChecker", { state: "running" });
-    setTraceStatus("riskChecker", "running");
-    await wait(1300);
+  async function confirmNextAgent(): Promise<void> {
+    if (!pendingAgent || runState !== "awaiting-confirmation" || !activeRunId) {
+      return;
+    }
+    const agentId = pendingAgent;
+    pendingAgent = null;
+    runState = "running";
+    const token = runToken;
+
+    const labels: Record<string, string> = {
+      qualifier: "Requirements Agent",
+      architect: "Architect Agent",
+      riskChecker: "Risk Agent",
+    };
+    addMessage("system", `→ ${labels[agentId]}: Running...`);
+
+    // Get the original prompt from the first user message
+    const userPrompt = messages.find((m) => m.role === "user")?.text ?? "";
+
+    // Get previous agent output for incremental execution
+    let previousOutput: unknown;
+    if (agentId === "architect") {
+      previousOutput = (globalThis as any).__qualifierOutput;
+    } else if (agentId === "riskChecker") {
+      previousOutput = (globalThis as any).__architectOutput;
+    }
+
+    await runAgentStep(agentId, userPrompt, previousOutput, token);
     if (isCancelled(token)) {
       return;
     }
-    updateAgent("riskChecker", { state: "done" });
-    setTraceStatus("riskChecker", "done");
-    updateAgent("hitl", { state: "running" });
+    addMessage("system", `✓ ${labels[agentId]} complete`);
+
+    // Determine next agent
+    const nextAgent: Record<AgentId, AgentId | null> = {
+      qualifier: "architect",
+      architect: "riskChecker",
+      riskChecker: "hitl",
+      hitl: null,
+      orchestrator: null,
+      mcpTools: null,
+    };
+    const next = nextAgent[agentId];
+    if (!next) {
+      return;
+    }
+
+    if (next === "hitl") {
+      updateAgent("hitl", { state: "running" });
+      addMessage(
+        "system",
+        "⏸️ Pipeline paused at HITL Gate — awaiting your review",
+      );
+      runState = "paused";
+      updateAgent("orchestrator", { state: "done" });
+      return;
+    }
+
+    // Ask for confirmation before next agent
+    pendingAgent = next;
+    runState = "awaiting-confirmation";
+    addMessage(
+      "system",
+      `⏸️ Ready to run ${labels[next]}. Confirm to continue.`,
+    );
   }
 
   function applyTraceSummary(summary: RunTraceSummary): void {
-    traceRows = summary.agents.map((agent) => {
-      const previous = traceRows.find((row) => row.id === agent.agent);
-      const hasData = agent.latencyMs !== null || agent.tokenCount !== null;
-      const evalScore = agent.evalScore;
-      let status: TraceSummaryRow["status"] = previous?.status ?? "pending";
-      if (hasData) {
-        status = evalScore !== null && evalScore < 3 ? "warning" : "done";
-      }
-      return {
-        id: agent.agent,
-        label: agent.label,
-        status,
+    const observations: TraceObservationRow[] = [];
+    let rowId = 0;
+
+    // Add pipeline SPAN
+    observations.push({
+      id: `obs-${rowId++}`,
+      name: "agentflow.pipeline",
+      type: "SPAN",
+      latency:
+        summary.aggregate.latencyMs === null
+          ? "--"
+          : `${(summary.aggregate.latencyMs / 1000).toFixed(1)}s`,
+      tokens:
+        summary.aggregate.totalTokens === null
+          ? "--"
+          : summary.aggregate.totalTokens.toLocaleString("en-US"),
+      cost:
+        summary.aggregate.costUsd === null
+          ? "--"
+          : `$${summary.aggregate.costUsd.toFixed(4)}`,
+      level: "DEFAULT",
+    });
+
+    // Add agent observations
+    for (const agent of summary.agents) {
+      // AGENT observation
+      observations.push({
+        id: `obs-${rowId++}`,
+        name: `agentflow.agent.${agent.agent}`,
+        type: "AGENT",
         latency:
           agent.latencyMs === null
-            ? (previous?.latency ?? "--")
+            ? "--"
             : `${(agent.latencyMs / 1000).toFixed(1)}s`,
         tokens:
           agent.tokenCount === null
-            ? (previous?.tokens ?? "--")
+            ? "--"
             : agent.tokenCount.toLocaleString("en-US"),
-        cost:
-          agent.costUsd === null
-            ? (previous?.cost ?? "--")
-            : `$${agent.costUsd.toFixed(4)}`,
-        eval:
-          evalScore === null ? (previous?.eval ?? "--") : evalScore.toFixed(1),
-      };
-    });
-    if (summary.hitl) {
-      traceRows = [
-        ...traceRows,
-        {
-          id: "hitl",
-          label: "HITL Review",
-          status: "done",
-          latency: `${(summary.hitl.humanLatencyMs / 1000).toFixed(1)}s`,
-          tokens: "--",
-          cost: "--",
-          eval: summary.hitl.decision,
-        },
-      ];
+        cost: agent.costUsd === null ? "--" : `$${agent.costUsd.toFixed(4)}`,
+        level:
+          agent.evalScore !== null && agent.evalScore < 3
+            ? "WARNING"
+            : "DEFAULT",
+      });
+
+      // GENERATION observation
+      observations.push({
+        id: `obs-${rowId++}`,
+        name: `${agent.label} generation`,
+        type: "GENERATION",
+        latency:
+          agent.latencyMs === null
+            ? "--"
+            : `${(agent.latencyMs / 1000).toFixed(1)}s`,
+        tokens:
+          agent.tokenCount === null
+            ? "--"
+            : agent.tokenCount.toLocaleString("en-US"),
+        cost: agent.costUsd === null ? "--" : `$${agent.costUsd.toFixed(4)}`,
+        level:
+          agent.evalScore !== null && agent.evalScore < 3
+            ? "WARNING"
+            : "DEFAULT",
+      });
     }
+
+    // Add HITL EVENT if present
+    if (summary.hitl) {
+      observations.push({
+        id: `obs-${rowId++}`,
+        name: "hitl_gate_decision",
+        type: "EVENT",
+        latency: `${(summary.hitl.humanLatencyMs / 1000).toFixed(1)}s`,
+        tokens: "--",
+        cost: "--",
+        level: "DEFAULT",
+      });
+    }
+
+    traceRows = observations;
+
     traceTotals = {
       latency:
         summary.aggregate.latencyMs === null
@@ -456,6 +727,60 @@
       : null;
   }
 
+  function formatAgentResult(
+    agentName: string,
+    output: QualifierOutput | ArchitectOutput | RiskCheckerOutput,
+  ): string {
+    if (agentName === "Requirements Agent") {
+      const qualifier = output as QualifierOutput;
+      return [
+        `**${agentName} Results:**`,
+        "",
+        `**Industry:** ${qualifier.industry}`,
+        `**Data Stack:** ${qualifier.data_stack.join(", ")}`,
+        `**Cloud:** ${qualifier.cloud}`,
+        `**Constraints:** ${qualifier.constraints.join(", ")}`,
+        `**Latency:** ${qualifier.latency}`,
+        "",
+        "**Extracted Requirements:**",
+        ...qualifier.requirements.map((req) => `- ${req}`),
+      ].join("\n");
+    }
+    if (agentName === "Architect Agent") {
+      const architect = output as ArchitectOutput;
+      return [
+        `**${agentName} Results:**`,
+        "",
+        `**Architecture Summary:** ${architect.architecture_summary}`,
+        "",
+        "**Recommended Components:**",
+        ...architect.recommended_components.map((comp) => `- ${comp}`),
+        "",
+        "**Data Zones:**",
+        ...architect.data_zones.map((zone) => `- ${zone}`),
+        "",
+        "**Integration Notes:**",
+        ...architect.integration_notes.map((note) => `- ${note}`),
+      ].join("\n");
+    }
+    if (agentName === "Risk Agent") {
+      const riskChecker = output as RiskCheckerOutput;
+      return [
+        `**${agentName} Results:**`,
+        "",
+        `**Overall Score:** ${riskChecker.overall_score.toFixed(1)}/5`,
+        `**Recommendation:** ${riskChecker.recommendation}`,
+        "",
+        "**Risks:**",
+        ...riskChecker.risks.map(
+          (risk) =>
+            `- [${risk.severity.toUpperCase()}] ${risk.name}: ${risk.description}`,
+        ),
+      ].join("\n");
+    }
+    return `**${agentName} Results:** ${JSON.stringify(output, null, 2)}`;
+  }
+
   function applyPipelineData(response: PipelineResponse): void {
     responseAppliedToken = runToken;
     activeRunId = response.runId;
@@ -490,6 +815,18 @@
       runState = "paused";
       addMessage(
         "system",
+        formatAgentResult("Requirements Agent", response.pipeline.qualifier),
+      );
+      addMessage(
+        "system",
+        formatAgentResult("Architect Agent", response.pipeline.architect),
+      );
+      addMessage(
+        "system",
+        formatAgentResult("Risk Agent", response.pipeline.riskChecker),
+      );
+      addMessage(
+        "system",
         "Human review required. Approve or edit the POC plan in the HITL Gate node.",
       );
       editPlanText = JSON.stringify(response.gate?.proposedPlan, null, 2);
@@ -497,6 +834,18 @@
     }
     runState = "completed";
     finalOutput = response.finalOutput ?? null;
+    addMessage(
+      "system",
+      formatAgentResult("Requirements Agent", response.pipeline.qualifier),
+    );
+    addMessage(
+      "system",
+      formatAgentResult("Architect Agent", response.pipeline.architect),
+    );
+    addMessage(
+      "system",
+      formatAgentResult("Risk Agent", response.pipeline.riskChecker),
+    );
     addMessage("system", "Pipeline completed. The draft POC plan is ready.");
   }
 
@@ -630,14 +979,20 @@
       class="grid min-h-0 flex-1 grid-cols-[450px_minmax(0,1fr)] divide-x-2 divide-darkgrey-400 overflow-hidden"
     >
       <ChatPanel
+        awaitingConfirmation={runState === "awaiting-confirmation"}
         canReset={runState !== "idle" || messages.length > 0}
         {diagramHtml}
         {diagramUnavailable}
         disabled={isInteractionLocked}
         {messages}
+        onConfirm={confirmNextAgent}
         onReset={resetConversation}
+        onRoutingModeChange={(mode) => {
+          routingMode = mode;
+        }}
         onSend={runPipeline}
         output={finalOutput}
+        {routingMode}
       />
 
       <section class="flex min-h-0 flex-col bg-darkgrey-50">
@@ -657,6 +1012,36 @@
             panOnDrag={false}
             zoomOnScroll={false}
           >
+            <svg style="position: absolute; width: 0; height: 0;">
+              <defs>
+                <marker
+                  id="arrowhead"
+                  markerHeight="5"
+                  markerWidth="6"
+                  orient="auto"
+                  refX="5"
+                  refY="2.5"
+                >
+                  <polygon
+                    fill="oklch(0.66 0.008 260)"
+                    points="0 0, 6 2.5, 0 5"
+                  />
+                </marker>
+                <marker
+                  id="arrowhead-active"
+                  markerHeight="5"
+                  markerWidth="6"
+                  orient="auto"
+                  refX="5"
+                  refY="2.5"
+                >
+                  <polygon
+                    fill="oklch(0.55 0.16 250)"
+                    points="0 0, 6 2.5, 0 5"
+                  />
+                </marker>
+              </defs>
+            </svg>
             <Background gap={18} size={1.2} variant={BackgroundVariant.Dots} />
             <Controls showInteractive={false} />
           </SvelteFlow>

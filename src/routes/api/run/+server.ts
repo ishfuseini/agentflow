@@ -2,7 +2,7 @@ import { json } from "@sveltejs/kit";
 import { z } from "zod";
 import { buildFinalPocOutput, shouldPauseForHitl } from "$lib/pipeline/hitl";
 import { createPendingHitlRun } from "$lib/pipeline/hitl-state";
-import { runPipeline } from "$lib/pipeline/orchestrator";
+import { runPipeline, runSingleAgent } from "$lib/pipeline/orchestrator";
 import { ROUTING_MODES } from "$lib/pipeline/routing";
 import type { RequestHandler } from "./$types";
 
@@ -16,6 +16,15 @@ const RunRequestSchema = z.object({
 	 * pipeline is still running. The server generates one when omitted.
 	 */
 	runId: z.string().min(1).optional(),
+	/**
+	 * Optional agent id to run a single agent incrementally.
+	 * When provided, runs only that agent using stored intermediate state.
+	 */
+	agentId: z.enum(["qualifier", "architect", "riskChecker"]).optional(),
+	/**
+	 * Previous agent output to pass as input when running incrementally.
+	 */
+	previousOutput: z.unknown().optional(),
 });
 
 type RunRequest = z.infer<typeof RunRequestSchema>;
@@ -46,6 +55,27 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	try {
 		const runId = runRequest.runId ?? crypto.randomUUID();
+
+		// Incremental single-agent execution
+		if (runRequest.agentId) {
+			const singleResult = await runSingleAgent(
+				runRequest.agentId,
+				runRequest.prompt,
+				runRequest.routingMode,
+				runRequest.previousOutput,
+				runRequest.domain,
+				runId,
+			);
+			return json({
+				status: "agent-complete",
+				runId,
+				agentId: singleResult.agentId,
+				output: singleResult.output,
+				toolCalls: singleResult.toolCalls,
+			});
+		}
+
+		// Full pipeline execution (legacy)
 		const result = await runPipeline(
 			runRequest.prompt,
 			runRequest.routingMode,

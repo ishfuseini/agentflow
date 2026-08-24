@@ -752,7 +752,13 @@ test("fetchRunTraces maps Langfuse API observations to per-agent rows, HITL row,
 	const state = resetLangfuseState();
 	const pipelineTraceId = "trace-pipeline";
 	const hitlTraceId = "trace-hitl";
-	const observation = (id, name, type, parentObservationId, overrides = {}) => ({
+	const observation = (
+		id,
+		name,
+		type,
+		parentObservationId,
+		overrides = {},
+	) => ({
 		id,
 		name,
 		type,
@@ -777,7 +783,7 @@ test("fetchRunTraces maps Langfuse API observations to per-agent rows, HITL row,
 				observations: [
 					observation("obs-q", "agentflow.agent.qualifier", "AGENT", null, {
 						latency: 0.9,
-						metadata: { costUsd: 0.00002 },
+						metadata: { costUsd: 0.000_02 },
 					}),
 					observation("gen-q", "Qualifier generation", "GENERATION", "obs-q", {
 						latency: 0.9,
@@ -793,16 +799,20 @@ test("fetchRunTraces maps Langfuse API observations to per-agent rows, HITL row,
 					}),
 					observation("obs-r", "agentflow.agent.riskChecker", "AGENT", null, {
 						latency: 1.3,
-						metadata: { costUsd: 0.00004 },
+						metadata: { costUsd: 0.000_04 },
 					}),
-					observation("gen-r", "Risk Checker generation", "GENERATION", "obs-r", {
-						latency: 1.3,
-						usageDetails: { input: 5, output: 9, total: 14 },
-					}),
+					observation(
+						"gen-r",
+						"Risk Checker generation",
+						"GENERATION",
+						"obs-r",
+						{
+							latency: 1.3,
+							usageDetails: { input: 5, output: 9, total: 14 },
+						},
+					),
 				],
-				scores: [
-					{ name: "eval_score", value: 4, observationId: "obs-r" },
-				],
+				scores: [{ name: "eval_score", value: 4, observationId: "obs-r" }],
 			};
 		}
 		if (traceId === hitlTraceId) {
@@ -828,10 +838,10 @@ test("fetchRunTraces maps Langfuse API observations to per-agent rows, HITL row,
 		assert.equal(summary.agents.length, 3);
 
 		const qualifier = summary.agents.find((item) => item.agent === "qualifier");
-		assert.equal(qualifier.label, "Qualifier");
+		assert.equal(qualifier.label, "Requirements Agent");
 		assert.equal(qualifier.latencyMs, 900);
 		assert.equal(qualifier.tokenCount, 46);
-		assert.equal(qualifier.costUsd, 0.00002);
+		assert.equal(qualifier.costUsd, 0.000_02);
 		assert.equal(qualifier.evalScore, null);
 
 		const architect = summary.agents.find((item) => item.agent === "architect");
@@ -839,17 +849,19 @@ test("fetchRunTraces maps Langfuse API observations to per-agent rows, HITL row,
 		assert.equal(architect.tokenCount, 300);
 		assert.equal(architect.costUsd, 0.015);
 
-		const riskChecker = summary.agents.find((item) => item.agent === "riskChecker");
+		const riskChecker = summary.agents.find(
+			(item) => item.agent === "riskChecker",
+		);
 		assert.equal(riskChecker.latencyMs, 1300);
 		assert.equal(riskChecker.tokenCount, 14);
-		assert.equal(riskChecker.costUsd, 0.00004);
+		assert.equal(riskChecker.costUsd, 0.000_04);
 		assert.equal(riskChecker.evalScore, 4);
 
 		assert.equal(summary.hitl.decision, "approved");
 		assert.equal(summary.hitl.humanLatencyMs, 1234);
 		assert.equal(summary.aggregate.latencyMs, 3400);
 		assert.equal(summary.aggregate.totalTokens, 360);
-		assert.equal(summary.aggregate.costUsd, 0.00002 + 0.015 + 0.00004);
+		assert.equal(summary.aggregate.costUsd, 0.000_02 + 0.015 + 0.000_04);
 		assert.equal(summary.aggregate.evalScore, 4);
 	} finally {
 		await server.close();
@@ -885,7 +897,7 @@ test("GET /api/traces returns the run trace summary from the Langfuse API client
 				agents: [
 					{
 						agent: "qualifier",
-						label: "Qualifier",
+						label: "Requirements Agent",
 						latencyMs: 900,
 						tokenCount: 46,
 						costUsd: 0.00002,

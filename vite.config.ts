@@ -24,4 +24,11 @@ export default defineConfig({
 		// instead of letting Node load the files directly.
 		noExternal: ["@lucide/svelte"],
 	},
+	server: {
+		watch: {
+			// Test files aren't part of the app's SSR module graph. Ignore them so
+			// editing/running tests during dev doesn't trigger noisy SSR page reloads.
+			ignored: [/[/\\]tests[/\\]/],
+		},
+	},
 });

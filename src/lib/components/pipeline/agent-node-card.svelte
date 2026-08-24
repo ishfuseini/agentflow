@@ -1,27 +1,27 @@
 <script lang="ts">
-  import { AlertTriangle, CheckCircle2, Circle } from "@lucide/svelte";
+  import { AlertTriangle, CheckCircle2, Circle, Zap } from "@lucide/svelte";
   import { Handle, type NodeProps, Position } from "@xyflow/svelte";
   import type { AgentNodeData } from "./types";
 
   let { data }: NodeProps = $props();
 
   const nodeData = $derived(data as AgentNodeData);
-  /** The HITL gate hosts the interactive review panel, so it stays a bit wider. */
-  const cardWidth = $derived(
-    nodeData.id === "hitl" ? "w-[220px]" : "w-[180px]",
-  );
+  const cardWidth = $derived("w-[180px]");
+  const cardMinHeight = $derived("min-h-[80px]");
 
   function stateClass(state: AgentNodeData["state"]): string {
+    // Every state gets a 4px border (transparent when idle/done) so the box
+    // model — and therefore the top-right status icon position — stays
+    // identical across states. Without this, the running/paused/warning
+    // border would shift the header content inward and the glowing dot would
+    // jump relative to the idle/done icons.
     if (state === "running") {
-      return "border-rebeccapurple-500 shadow-[0_0_0_4px_oklch(0.39_0.15_299_/_0.12),0_14px_40px_oklch(0.39_0.15_299_/_0.22)]";
+      return "flex items-center justify-center border-4 border-dodgerblue-600 rounded-md transition-all duration-300 ease-linear";
     }
-    if (state === "paused") {
-      return "border-sienna-500 shadow-[0_0_0_4px_oklch(0.58_0.17_44_/_0.14),0_14px_40px_oklch(0.58_0.17_44_/_0.2)]";
+    if (state === "paused" || state === "warning") {
+      return "flex items-center justify-center border-4 border-sienna-600 rounded-md transition-all duration-300 ease-linear";
     }
-    if (state === "warning") {
-      return "border-sienna-500";
-    }
-    return "border-darkcyan-500";
+    return "border-4 border-transparent rounded-md transition-all duration-300 ease-linear";
   }
 
   function dispatchNodeAction(
@@ -34,13 +34,14 @@
 
 <Handle
   class="!h-2 !w-2 !border-0 !bg-transparent"
-  position={Position.Left}
+  position={Position.Top}
   type="target"
 />
 
 <article
   aria-describedby={nodeData.subtitle ? `node-tooltip-${nodeData.id}` : undefined}
-  class={`group relative nodrag rounded-md border-2 bg-background/95 p-3 text-foreground transition-all duration-300 ${cardWidth} ${stateClass(nodeData.state)}`}
+  class={`group relative nodrag rounded-md p-3 text-white transition-all duration-300 ${cardWidth} ${cardMinHeight} ${stateClass(nodeData.state)}`}
+  style="background-color: oklch(0.8078 0 0);"
 >
   {#if nodeData.subtitle}
     <span
@@ -51,34 +52,62 @@
       {nodeData.subtitle}
     </span>
   {/if}
-  <header class="flex items-center justify-between gap-2">
-    <p class="truncate font-heading text-sm font-semibold leading-tight">
-      {nodeData.label}
-    </p>
-    <div class="shrink-0">
-      {#if nodeData.state === "running"}
-        <span aria-label="running" class="relative flex h-4 w-4" role="status">
+  <header class="flex flex-col gap-1">
+    <div class="flex items-center justify-between">
+      <p class="truncate font-heading text-sm font-semibold leading-tight">
+        {nodeData.label}
+      </p>
+      <div class="shrink-0">
+        {#if nodeData.state === "running"}
           <span
-            class="absolute inline-flex h-full w-full animate-ping rounded-full bg-rebeccapurple-500 opacity-70"
-          ></span>
-          <span
-            class="relative inline-flex h-4 w-4 rounded-full bg-rebeccapurple-500"
-          ></span>
-        </span>
-      {:else if nodeData.state === "done"}
-        <CheckCircle2 aria-label="done" class="h-4 w-4 text-darkcyan-600" />
-      {:else if nodeData.state === "warning" || nodeData.state === "paused"}
-        <AlertTriangle
-          aria-label={nodeData.state}
-          class="h-4 w-4 text-sienna-600"
-        />
-      {:else}
-        <Circle
-          aria-label="idle"
-          class="h-4 w-4 fill-darkgrey-300 text-darkgrey-400"
-        />
-      {/if}
+            aria-label="running"
+            class="relative flex h-4 w-4"
+            role="status"
+          >
+            <span
+              class="absolute inline-flex h-full w-full animate-ping rounded-full bg-rebeccapurple-500 opacity-70"
+            ></span>
+            <span
+              class="relative inline-flex h-4 w-4 rounded-full bg-rebeccapurple-500"
+            ></span>
+          </span>
+        {:else if nodeData.state === "done"}
+          <CheckCircle2 aria-label="done" class="h-4 w-4 text-green-600" />
+        {:else if nodeData.state === "warning" || nodeData.state === "paused"}
+          <AlertTriangle
+            aria-label={nodeData.state}
+            class="h-4 w-4 text-sienna-600"
+          />
+        {:else}
+          <Circle
+            aria-label="idle"
+            class="h-4 w-4 fill-darkgrey-300 text-darkgrey-400"
+          />
+        {/if}
+      </div>
     </div>
+
+    {#if nodeData.steps && nodeData.steps.length > 0 && nodeData.state !== "idle"}
+      <div class="flex w-full flex-col gap-0.5">
+        {#each nodeData.steps as step (step.id)}
+          <div class="flex items-center gap-1 text-[9px] leading-tight">
+            <Zap
+              aria-hidden="true"
+              class={`h-2.5 w-2.5 shrink-0 ${
+                step.status === "done"
+                  ? "text-darkcyan-600"
+                  : step.status === "running"
+                    ? "animate-pulse text-rebeccapurple-500"
+                    : "text-darkgrey-400"
+              }`}
+            />
+            <span class="truncate text-foreground-muted/80"
+              >{step.label}()</span
+            >
+          </div>
+        {/each}
+      </div>
+    {/if}
   </header>
 
   {#if nodeData.state === "paused"}
@@ -90,18 +119,22 @@
         PAUSED &mdash; awaiting review
       </p>
       {#if nodeData.reviewReason}
-        <p class="mt-1 text-[10px] leading-snug text-sienna-800">
+        <p
+          class="mt-1 max-h-16 overflow-y-auto text-[10px] leading-snug text-sienna-800"
+        >
           {nodeData.reviewReason}
         </p>
       {/if}
       {#if nodeData.riskSummary && nodeData.riskSummary.length > 0}
-        <ul class="mt-1.5 space-y-1 text-[10px] text-sienna-900">
+        <ul
+          class="mt-1.5 max-h-20 space-y-1 overflow-y-auto text-[10px] text-sienna-900"
+        >
           {#each nodeData.riskSummary as risk (risk.issue)}
             <li class="flex gap-1">
               <span
                 class="mt-1 h-1 w-1 shrink-0 rounded-full bg-sienna-600"
               ></span>
-              <span>{risk.issue}</span>
+              <span class="truncate">{risk.issue}</span>
             </li>
           {/each}
         </ul>
@@ -109,7 +142,9 @@
       {#if nodeData.proposedPlan}
         <div class="mt-2 rounded-sm bg-background/80 p-1.5 text-[10px]">
           <p class="font-medium text-foreground">Proposed POC</p>
-          <p class="mt-0.5 leading-snug text-foreground-muted">
+          <p
+            class="mt-0.5 max-h-12 overflow-y-auto leading-snug text-foreground-muted"
+          >
             {nodeData.proposedPlan.scope}
           </p>
         </div>
@@ -136,6 +171,6 @@
 
 <Handle
   class="!h-2 !w-2 !border-0 !bg-transparent"
-  position={Position.Right}
+  position={Position.Bottom}
   type="source"
 />

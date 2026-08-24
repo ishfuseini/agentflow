@@ -12,6 +12,7 @@ import {
 	createAgentflowMcpServer,
 	RISK_CHECKER_MCP_TOOLS,
 } from "$lib/mcp/server";
+import { configureAgentsTracing } from "./agents-tracing";
 import {
 	type AgentTraceRecord,
 	traceAgentRun,
@@ -118,6 +119,7 @@ export async function runPipeline(
 	domain?: string,
 	runId: string = crypto.randomUUID(),
 ): Promise<PipelineResult> {
+	configureAgentsTracing();
 	const models = resolveAgentModels(routingMode);
 
 	const architectServer = createAgentflowMcpServer(ARCHITECT_MCP_TOOLS);
@@ -138,7 +140,7 @@ export async function runPipeline(
 					await traceAgentRun({
 						runId,
 						agentKey: "qualifier",
-						agentName: "Qualifier",
+						agentName: "Requirements Agent",
 						routingMode,
 						model: models.qualifier,
 						input: prompt,
@@ -147,7 +149,7 @@ export async function runPipeline(
 					});
 				const qualifierOutput: QualifierOutput = requireFinalOutput(
 					qualifierResult.finalOutput,
-					"Qualifier",
+					"Requirements Agent",
 				);
 
 				const architectInput = domain
@@ -157,7 +159,7 @@ export async function runPipeline(
 					await traceAgentRun({
 						runId,
 						agentKey: "architect",
-						agentName: "Architect",
+						agentName: "Architect Agent",
 						routingMode,
 						model: models.architect,
 						input: architectInput,
@@ -169,7 +171,7 @@ export async function runPipeline(
 					});
 				const architectOutput: ArchitectOutput = requireFinalOutput(
 					architectResult.finalOutput,
-					"Architect",
+					"Architect Agent",
 				);
 
 				const riskCheckerInput = JSON.stringify(architectOutput);
@@ -177,7 +179,7 @@ export async function runPipeline(
 					await traceAgentRun({
 						runId,
 						agentKey: "riskChecker",
-						agentName: "Risk Checker",
+						agentName: "Risk Agent",
 						routingMode,
 						model: models.riskChecker,
 						input: riskCheckerInput,
@@ -193,7 +195,7 @@ export async function runPipeline(
 					});
 				const riskCheckerOutput: RiskCheckerOutput = requireFinalOutput(
 					riskCheckerResult.finalOutput,
-					"Risk Checker",
+					"Risk Agent",
 				);
 
 				return {
@@ -221,5 +223,118 @@ export async function runPipeline(
 			architectServer.close(),
 			riskCheckerServer.close(),
 		]);
+	}
+}
+
+export interface SingleAgentResult {
+	agentId: "qualifier" | "architect" | "riskChecker";
+	output: QualifierOutput | ArchitectOutput | RiskCheckerOutput;
+	trace: AgentTraceRecord;
+	toolCalls: ToolCallRecord[];
+}
+
+/**
+ * Runs a single agent incrementally, using previous agent output as input.
+ * Used for per-step confirmation flow where user approves each agent before running.
+ */
+export async function runSingleAgent(
+	agentId: "qualifier" | "architect" | "riskChecker",
+	prompt: string,
+	routingMode: RoutingMode,
+	previousOutput?: unknown,
+	domain?: string,
+	runId: string = crypto.randomUUID(),
+): Promise<SingleAgentResult> {
+	configureAgentsTracing();
+	const models = resolveAgentModels(routingMode);
+
+	if (agentId === "qualifier") {
+		const { result, trace } = await traceAgentRun({
+			runId,
+			agentKey: "qualifier",
+			agentName: "Requirements Agent",
+			routingMode,
+			model: models.qualifier,
+			input: prompt,
+			execute: () => run(createQualifierAgent(models.qualifier.model), prompt),
+		});
+		const output: QualifierOutput = requireFinalOutput(
+			result.finalOutput,
+			"Requirements Agent",
+		);
+		return {
+			agentId: "qualifier",
+			output,
+			trace,
+			toolCalls: [],
+		};
+	}
+
+	if (agentId === "architect") {
+		const architectServer = createAgentflowMcpServer(ARCHITECT_MCP_TOOLS);
+		try {
+			await architectServer.connect();
+			const architectInput = domain
+				? `${JSON.stringify(previousOutput)}\n\nCustomer company domain hint — use verbatim as the "domain" argument for brand_context_lookup: ${domain}`
+				: JSON.stringify(previousOutput);
+			const { result, trace } = await traceAgentRun({
+				runId,
+				agentKey: "architect",
+				agentName: "Architect Agent",
+				routingMode,
+				model: models.architect,
+				input: architectInput,
+				execute: () =>
+					run(
+						createArchitectAgent(models.architect.model, architectServer),
+						architectInput,
+					),
+			});
+			const output: ArchitectOutput = requireFinalOutput(
+				result.finalOutput,
+				"Architect Agent",
+			);
+			return {
+				agentId: "architect",
+				output,
+				trace,
+				toolCalls: extractToolCalls("architect", result.newItems),
+			};
+		} finally {
+			await architectServer.close();
+		}
+	}
+
+	// riskChecker
+	const riskCheckerServer = createAgentflowMcpServer(RISK_CHECKER_MCP_TOOLS);
+	try {
+		await riskCheckerServer.connect();
+		const riskCheckerInput = JSON.stringify(previousOutput);
+		const { result, trace } = await traceAgentRun({
+			runId,
+			agentKey: "riskChecker",
+			agentName: "Risk Agent",
+			routingMode,
+			model: models.riskChecker,
+			input: riskCheckerInput,
+			execute: () =>
+				run(
+					createRiskCheckerAgent(models.riskChecker.model, riskCheckerServer),
+					riskCheckerInput,
+				),
+			getEvalScore: (riskResult) => riskResult.finalOutput?.overall_score,
+		});
+		const output: RiskCheckerOutput = requireFinalOutput(
+			result.finalOutput,
+			"Risk Agent",
+		);
+		return {
+			agentId: "riskChecker",
+			output,
+			trace,
+			toolCalls: extractToolCalls("riskChecker", result.newItems),
+		};
+	} finally {
+		await riskCheckerServer.close();
 	}
 }

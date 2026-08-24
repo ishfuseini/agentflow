@@ -54,7 +54,7 @@
 - [x] 6.5 Implement a running progress indicator on each agent NodeCard: a step count (e.g., `2/4`) + a row of step markers that fill as each execution task completes (completed: `darkcyan-600` CheckCircle2; active: pulsing `rebeccapurple-500`; pending: `darkgrey-400`). The NodeCard expands vertically as each task's detail row appears. Steps are agent-specific (Architect: arch_pattern_lookup, tool_selection_lookup, brand_context_lookup, synthesize plan = 4; Risk Checker: risk_policy_lookup, evaluate rubric, produce assessment = 3; Qualifier: extract requirements = 1). Verify the Architect NodeCard shows the count advancing 1/4 → 2/4 → 3/4 → 4/4 and expands with each row during a run
 - [x] 6.6 Build the chat panel (Col 1): quick scenario buttons fixed at top (4 scenarios, disabled during run), `hr` divider, "Agent Chat" header, scrollable conversation thread (user bubbles right-aligned purple `rounded-br-sm`, system bubbles left-aligned grey `rounded-bl-sm`, anchor to bottom/grow upward), input row + send button (`w-9 h-9`) pinned to bottom with `border-t-2`, Enter submits / Shift+Enter newline, "← New conversation" reset link after a run. Verify clicking a scenario button sends it as a user message and starts the pipeline; verify typing + Enter sends a custom message and starts the pipeline
 - [x] 6.7 Implement the "← New conversation" reset: clicking it clears the conversation thread and resets the node diagram, trace panel, and output panel to idle. Verify all panels reset after clicking it
-- [ ] 6.8 Implement the routing strategy toggle UI (Cost vs. Intelligence). Verify toggling the mode changes the label and the next pipeline run uses the selected routing
+- [x] 6.8 Implement the routing strategy toggle UI (Cost vs. Intelligence). Verify toggling the mode changes the label and the next pipeline run uses the selected routing
 - [x] 6.9 Build the structured output panel (Col 3): renders final POC plan (use cases, success criteria, exit criteria, risks, architecture summary) with staggered `motion` entrance (`delay: si * 0.12`), `rebeccapurple-500` bullet dots, "POC Plan" heading with `darkcyan` "draft" pill. Panel returns `null` until pipeline completes. Verify the output renders after pipeline completion (post-HITL approval) with the staggered animation
 - [x] 6.10 Implement the HITL gate UI inside the HITL NodeCard: `paused` state (sienna border + amber glow), "PAUSED — awaiting review" text, Approve (primary) / Edit (ghost) buttons, risk summary, proposed POC plan. No auto-advance — the gate waits for explicit action. Verify the HITL UI appears when the pipeline pauses and both buttons are functional
 - [x] 6.11 Implement the LLMStreamBlock per agent: simulated token stream at 3 chars / 18ms, blinking `rebeccapurple-500` cursor while streaming, `CheckCircle2` in `darkcyan-600` when done, card header `bg-darkgrey-200/50`. Verify each agent's output streams progressively with the blinking cursor during execution
@@ -85,15 +85,15 @@
 
 # 9. Chat, Node Steps, and Flat Trace Table (phase 7 follow-up)
 
-- [ ] 9.1 Render agent results and the final POC plan as system bubbles in the chat thread, not status lines only. Verify each agent's output and the approved plan appear as left-aligned system bubbles in the conversation
-- [ ] 9.2 Auto-switch the chat panel to the Results tab when the pipeline completes. Verify the panel moves from Chat to Results on completion without a click, and the user can switch back
-- [ ] 9.3 Restore the step counter + step markers on agent NodeCards (Qualifier 1 step, Architect 4, Risk Checker 3). Verify the Architect card advances 1/4 → 2/4 → 3/4 → 4/4 during a run
-- [ ] 9.4 Restore per-step / tool-call detail rows inside agent NodeCards; the card expands as each step lands. Verify `arch_pattern_lookup`, `tool_selection_lookup`, and `brand_context_lookup` rows appear inside the Architect card
-- [ ] 9.5 Replace the per-agent trace table with flat observation rows (name · type · latency · tokens · cost · level) in chronological order, keeping the totals footer. Verify SPAN, AGENT, GENERATION, and EVENT rows each render as their own row with no per-agent grouping
+- [x] 9.1 Render agent results and the final POC plan as system bubbles in the chat thread, not status lines only. Verify each agent's output and the approved plan appear as left-aligned system bubbles in the conversation
+- [x] 9.2 Auto-switch the chat panel to the Results tab when the pipeline completes. Verify the panel moves from Chat to Results on completion without a click, and the user can switch back
+- [x] 9.3 Restore the step counter + step markers on agent NodeCards (Qualifier 1 step, Architect 4, Risk Checker 3). Verify the Architect card advances 1/4 → 2/4 → 3/4 → 4/4 during a run
+- [x] 9.4 Restore per-step / tool-call detail rows inside agent NodeCards; the card expands as each step lands. Verify `arch_pattern_lookup`, `tool_selection_lookup`, and `brand_context_lookup` rows appear inside the Architect card
+- [x] 9.5 Replace the per-agent trace table with flat observation rows (name · type · latency · tokens · cost · level) in chronological order, keeping the totals footer. Verify SPAN, AGENT, GENERATION, and EVENT rows each render as their own row with no per-agent grouping
 - [ ] 9.6 Verify the panel's observation rows match the Langfuse export for the same run (supersedes 7.8). Compare names, types, latencies, and costs against a `lf-events-export` JSON for that run
-- [ ] 9.7 Add an Orchestrator node that dispatches to each agent via numbered, labelled edges (1 qualify → 2 architect → 3 risk check → 4 review) with return edges. Verify the active dispatch edge highlights during its step and the return edge activates when the agent hands back
-- [ ] 9.8 Add an MCP Tools node with dashed edges from the Architect and Risk Checker (none from the Qualifier). Verify the edge activates while a tool call is in flight
-- [ ] 9.9 Add the chat entry greeting bubble (names the 3 agents, the MCP tool step, and the HITL gate) and a descriptive input placeholder. Verify both appear on load and restore after "← New conversation"
+- [x] 9.7 Add an Orchestrator node that dispatches to each agent via numbered, labelled edges (1 qualify → 2 architect → 3 risk check → 4 review) with return edges. Verify the active dispatch edge highlights during its step and the return edge activates when the agent hands back
+- [x] 9.8 Add an MCP Tools node with dashed edges from the Architect and Risk Checker (none from the Qualifier). Verify the edge activates while a tool call is in flight
+- [x] 9.9 Add the chat entry greeting bubble (names the 3 agents, the MCP tool step, and the HITL gate) and a descriptive input placeholder. Verify both appear on load and restore after "← New conversation"
 
 # 10. UI Refinement — Decluttered Layout (phase 6 follow-up)
 
@@ -108,8 +108,8 @@
 
 # 11. Deployment
 
-- [ ] 9.1 Configure Fly.io deployment (`fly.toml`) for the SvelteKit app with `adapter-node`. Verify the app deploys via `fly deploy` and is accessible on the Fly.io domain with automatic TLS
-- [ ] 9.2 Configure custom domain `agents.ishlab.dev` on Fly.io. Verify the domain resolves and serves the app with automatic TLS
-- [ ] 9.3 Smoke test from an external network: open `agents.ishlab.dev` in a browser. Verify the page loads and the chat panel is visible
-- [ ] 9.4 Run all 4 scenarios end-to-end on the deployed instance. Verify each scenario completes without errors: pipeline runs, HITL gate fires, final output renders, traces appear in both the app and Langfuse dashboard
-- [ ] 9.5 Record a 60-90s screen capture of a clean successful run as a fallback for interviews. Verify the recording exists and shows a full pipeline run from scenario selection to final output
+- [x] 11.1 Configure Fly.io deployment (`fly.toml`) for the SvelteKit app with `adapter-node`. Verify the app deploys via `fly deploy` and is accessible on the Fly.io domain with automatic TLS
+- [ ] 11.2 Configure custom domain `agents.ishlab.dev` on Fly.io. Verify the domain resolves and serves the app with automatic TLS
+- [ ] 11.3 Smoke test from an external network: open `agents.ishlab.dev` in a browser. Verify the page loads and the chat panel is visible
+- [ ] 11.4 Run all 4 scenarios end-to-end on the deployed instance. Verify each scenario completes without errors: pipeline runs, HITL gate fires, final output renders, traces appear in both the app and Langfuse dashboard
+- [ ] 11.5 Record a 60-90s screen capture of a clean successful run as a fallback for interviews. Verify the recording exists and shows a full pipeline run from scenario selection to final output

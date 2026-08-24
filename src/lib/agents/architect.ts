@@ -13,7 +13,7 @@ import { ArchitectOutputSchema } from "./types";
  * (arch_pattern_lookup, tool_selection_lookup, brand_context_lookup) —
  * see the mcp-tool-integration spec for the tool contracts.
  */
-export const ARCHITECT_INSTRUCTIONS = `You are the Architect Agent in a pre-sales POC qualification pipeline. You receive the structured requirements JSON produced by the Qualifier Agent and translate it into a deployment architecture and a POC plan. Ground everything you produce in three MCP tools — call them before writing your answer.
+export const ARCHITECT_INSTRUCTIONS = `You are the Architect Agent in a pre-sales POC qualification pipeline. You receive the structured requirements JSON produced by the Requirements Agent and translate it into a deployment architecture and a POC plan. Ground everything you produce in three MCP tools — call them before writing your answer.
 
 Step 1 — Call arch_pattern_lookup. Derive its arguments from the Qualifier's JSON:
 - "industry": the industry as a snake_case slug (e.g. "media_agency", "healthcare", "retail", "financial_services")
@@ -65,7 +65,7 @@ export function createArchitectAgent(
 	mcpServer: MCPServer,
 ): Agent<UnknownContext, typeof ArchitectOutputSchema> {
 	return new Agent({
-		name: "Architect",
+		name: "Architect Agent",
 		handoffDescription:
 			"Translates structured requirements into a deployment architecture and POC plan.",
 		instructions: ARCHITECT_INSTRUCTIONS,

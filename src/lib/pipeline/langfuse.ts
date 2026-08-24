@@ -669,9 +669,9 @@ const AGENT_OBSERVATION_NAMES: Record<TracedAgentKey, string> = {
 };
 
 const AGENT_LABELS: Record<TracedAgentKey, string> = {
-	qualifier: "Qualifier",
-	architect: "Architect",
-	riskChecker: "Risk Checker",
+	qualifier: "Requirements Agent",
+	architect: "Architect Agent",
+	riskChecker: "Risk Agent",
 };
 
 const TRACED_AGENTS: TracedAgentKey[] = [
@@ -717,7 +717,9 @@ function emptyRunTraceSummary(
 	};
 }
 
-function readCostUsd(observation: LangfuseObservation | undefined): number | null {
+function readCostUsd(
+	observation: LangfuseObservation | undefined,
+): number | null {
 	if (!observation) {
 		return null;
 	}
@@ -781,7 +783,9 @@ function extractAgentSummary(
 	return { agent, label, latencyMs, tokenCount, costUsd, evalScore };
 }
 
-function extractHitlSummary(trace: LangfuseTraceDetail): TraceHitlSummary | null {
+function extractHitlSummary(
+	trace: LangfuseTraceDetail,
+): TraceHitlSummary | null {
 	const root = trace.observations.find(
 		(observation) => observation.name === HITL_TRACE_NAME,
 	);
@@ -791,7 +795,9 @@ function extractHitlSummary(trace: LangfuseTraceDetail): TraceHitlSummary | null
 			? metadata.decision
 			: undefined;
 	let humanLatencyMs =
-		typeof metadata.humanLatencyMs === "number" ? metadata.humanLatencyMs : null;
+		typeof metadata.humanLatencyMs === "number"
+			? metadata.humanLatencyMs
+			: null;
 	if (humanLatencyMs === null) {
 		const score = trace.scores.find(
 			(item) => item.name === HUMAN_LATENCY_SCORE_NAME,
