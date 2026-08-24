@@ -38,7 +38,7 @@ function expect(condition: boolean, message: string): void {
 function parseToolResult(result: unknown): Record<string, unknown> {
 	const blocks = Array.isArray(result)
 		? result
-		: ((result as { content?: unknown[] })?.content ?? []);
+		: ((result as { content?: unknown[] } | null | undefined)?.content ?? []);
 	const text = (blocks as Array<{ type?: string; text?: string }>).find(
 		(block) => block?.type === "text",
 	)?.text;
