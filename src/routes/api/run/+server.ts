@@ -47,7 +47,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		);
 		const runId = crypto.randomUUID();
 		if (shouldPauseForHitl(result)) {
-			const pending = createPendingHitlRun(result, runId);
+			const pending = await createPendingHitlRun(result, runId);
 			return json({
 				status: "paused",
 				runId: pending.runId,

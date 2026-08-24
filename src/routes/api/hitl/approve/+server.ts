@@ -26,7 +26,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		);
 	}
 
-	const pending = getPendingHitlRun(parsed.data.runId);
+	const pending = await getPendingHitlRun(parsed.data.runId);
 	if (!pending) {
 		return json(
 			{ error: "No pending HITL run found for runId" },
