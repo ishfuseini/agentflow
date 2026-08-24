@@ -13,10 +13,10 @@ import { env } from "$env/dynamic/private";
  * providers within a single pipeline run.
  */
 
-const OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1";
+const DEFAULT_OLLAMA_BASE_URL = "https://ollama.com/v1";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-export const COST_MODEL_ID = "gpt-oss:20b";
+export const DEFAULT_COST_MODEL_ID = "gpt-oss:20b";
 export const INTELLIGENCE_MODEL_ID = "anthropic/claude-opus-4.8";
 
 /**
@@ -56,10 +56,13 @@ export function createOllamaCloudModel(): OpenAIChatCompletionsModel {
 	}
 
 	const client = new OpenAI({
-		baseURL: OLLAMA_CLOUD_BASE_URL,
+		baseURL: env.OLLAMA_ENDPOINT || DEFAULT_OLLAMA_BASE_URL,
 		apiKey,
 	});
-	return new OpenAIChatCompletionsModel(client, COST_MODEL_ID);
+	return new OpenAIChatCompletionsModel(
+		client,
+		env.OLLAMA_MODEL || DEFAULT_COST_MODEL_ID,
+	);
 }
 
 export function createOpenRouterModel(): OpenAIChatCompletionsModel {

@@ -26,6 +26,7 @@ export interface CompletedHitlRun {
 	decision: HitlDecisionType;
 	humanLatencyMs: number;
 	diff: JsonDiffEntry[];
+	telemetryLogged: boolean;
 	finalOutput: FinalPocOutput;
 	pipeline: PipelineResult;
 }
@@ -83,7 +84,7 @@ export async function completePendingHitlRun(
 			? diffPocPlans(pending.pipeline.architect.poc_plan, finalPlan)
 			: [];
 
-	await logHitlDecision({
+	const telemetryLogged = await logHitlDecision({
 		runId,
 		decision,
 		humanLatencyMs,
@@ -100,6 +101,7 @@ export async function completePendingHitlRun(
 		decision,
 		humanLatencyMs,
 		diff,
+		telemetryLogged,
 		finalOutput: buildFinalPocOutput(pending.pipeline, finalPlan),
 		pipeline: pending.pipeline,
 	};

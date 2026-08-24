@@ -40,6 +40,7 @@ interface HitlCompletedResponse {
 	decision: "approved" | "edited";
 	humanLatencyMs: number;
 	diff: Array<{ path: string; before: unknown; after: unknown }>;
+	telemetryLogged: boolean;
 	finalOutput: {
 		pocPlan: RunPausedResponse["gate"]["proposedPlan"];
 	};
@@ -130,6 +131,10 @@ const approved = await postJson<HitlCompletedResponse>("/api/hitl/approve", {
 expect(approved.status === "completed", "approve returns completed status");
 expect(approved.decision === "approved", "approve logs approved decision");
 expect(approved.humanLatencyMs >= 0, "approve captures human latency");
+expect(
+	typeof approved.telemetryLogged === "boolean",
+	"approve returns telemetry status",
+);
 expect(approved.diff.length === 0, "approve has no diff");
 expect(
 	JSON.stringify(approved.finalOutput.pocPlan) ===
@@ -152,6 +157,10 @@ const edited = await postJson<HitlCompletedResponse>("/api/hitl/edit", {
 expect(edited.status === "completed", "edit returns completed status");
 expect(edited.decision === "edited", "edit logs edited decision");
 expect(edited.humanLatencyMs >= 0, "edit captures human latency");
+expect(
+	typeof edited.telemetryLogged === "boolean",
+	"edit returns telemetry status",
+);
 expect(
 	edited.diff.some((entry) => entry.path === "scope"),
 	"edit includes diff",
