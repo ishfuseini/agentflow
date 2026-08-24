@@ -1,4 +1,4 @@
-import { run, type RunItem } from "@openai/agents";
+import { type RunItem, run } from "@openai/agents";
 import { createArchitectAgent } from "$lib/agents/architect";
 import { createQualifierAgent } from "$lib/agents/qualifier";
 import { createRiskCheckerAgent } from "$lib/agents/risk-checker";
@@ -9,10 +9,10 @@ import type {
 } from "$lib/agents/types";
 import {
 	ARCHITECT_MCP_TOOLS,
-	RISK_CHECKER_MCP_TOOLS,
 	createAgentflowMcpServer,
+	RISK_CHECKER_MCP_TOOLS,
 } from "$lib/mcp/server";
-import { resolveAgentModels, type RoutingMode } from "./routing";
+import { type RoutingMode, resolveAgentModels } from "./routing";
 
 /** Agents that call MCP tools during a run (the Qualifier makes no tool calls). */
 export type ToolCallingAgent = "architect" | "riskChecker";
@@ -71,7 +71,7 @@ function extractToolCalls(
 			continue;
 		}
 		const raw = item.rawItem;
-		if (!raw || raw.type !== "function_call") {
+		if (raw?.type !== "function_call") {
 			continue;
 		}
 		records.push({

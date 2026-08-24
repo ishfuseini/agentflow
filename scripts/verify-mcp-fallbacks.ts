@@ -15,7 +15,8 @@
  */
 import { MCPServerStreamableHttp } from "@openai/agents";
 
-const url = process.env.AGENTFLOW_MCP_URL ?? "https://agentflow-mcp.fly.dev/mcp";
+const url =
+	process.env.AGENTFLOW_MCP_URL ?? "https://agentflow-mcp.fly.dev/mcp";
 
 /** Generous timeout: the Fly.io deployment scales to zero when idle. */
 const MCP_TIMEOUT_MS = 60_000;
@@ -43,7 +44,9 @@ function parseToolResult(result: unknown): Record<string, unknown> {
 		(block) => block?.type === "text",
 	)?.text;
 	if (!text) {
-		throw new Error(`No text content block in tool result: ${JSON.stringify(result)}`);
+		throw new Error(
+			`No text content block in tool result: ${JSON.stringify(result)}`,
+		);
 	}
 	return JSON.parse(text) as Record<string, unknown>;
 }
@@ -62,20 +65,36 @@ try {
 	let brand: Record<string, unknown>;
 	try {
 		brand = parseToolResult(
-			await server.callTool("brand_context_lookup", { domain: UNRESOLVABLE_DOMAIN }),
+			await server.callTool("brand_context_lookup", {
+				domain: UNRESOLVABLE_DOMAIN,
+			}),
 		);
 		expect(true, "call resolved instead of throwing");
 	} catch (error) {
 		expect(false, `call resolved instead of throwing (threw: ${error})`);
 		throw error;
 	}
-	expect(brand.available === false, `available === false (got ${JSON.stringify(brand.available)})`);
-	expect(brand.logo_url === null, `logo_url === null (got ${JSON.stringify(brand.logo_url)})`);
-	expect(brand.company_name === null, `company_name === null (got ${JSON.stringify(brand.company_name)})`);
-	expect(brand.confidence === 0, `confidence === 0 (got ${JSON.stringify(brand.confidence)})`);
+	expect(
+		brand.available === false,
+		`available === false (got ${JSON.stringify(brand.available)})`,
+	);
+	expect(
+		brand.logo_url === null,
+		`logo_url === null (got ${JSON.stringify(brand.logo_url)})`,
+	);
+	expect(
+		brand.company_name === null,
+		`company_name === null (got ${JSON.stringify(brand.company_name)})`,
+	);
+	expect(
+		brand.confidence === 0,
+		`confidence === 0 (got ${JSON.stringify(brand.confidence)})`,
+	);
 	expect(typeof brand.message === "string", "carries a human-readable message");
 
-	console.log("\n3.7 — arch_pattern_lookup returns weak match with no diagram, does not throw");
+	console.log(
+		"\n3.7 — arch_pattern_lookup returns weak match with no diagram, does not throw",
+	);
 	let arch: Record<string, unknown>;
 	try {
 		arch = parseToolResult(
@@ -92,7 +111,10 @@ try {
 		expect(false, `call resolved instead of throwing (threw: ${error})`);
 		throw error;
 	}
-	expect(typeof arch.pattern_id === "string", `returns a fallback pattern_id (got ${JSON.stringify(arch.pattern_id)})`);
+	expect(
+		typeof arch.pattern_id === "string",
+		`returns a fallback pattern_id (got ${JSON.stringify(arch.pattern_id)})`,
+	);
 	expect(
 		typeof arch.confidence === "number" && (arch.confidence as number) < 0.5,
 		`confidence < 0.5 (got ${JSON.stringify(arch.confidence)})`,
@@ -101,7 +123,10 @@ try {
 		arch.diagram_data === undefined || arch.diagram_data === null,
 		"diagram_data omitted for a weak match",
 	);
-	expect(Array.isArray(arch.recommended_components), "still returns recommended_components to build on");
+	expect(
+		Array.isArray(arch.recommended_components),
+		"still returns recommended_components to build on",
+	);
 } finally {
 	await server.close().catch(() => undefined);
 }

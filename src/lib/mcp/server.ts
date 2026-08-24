@@ -1,7 +1,7 @@
 import {
 	createMCPToolStaticFilter,
-	MCPServerStreamableHttp,
 	type MCPServer,
+	MCPServerStreamableHttp,
 } from "@openai/agents";
 import { env } from "$env/dynamic/private";
 
@@ -30,7 +30,9 @@ export const ARCHITECT_MCP_TOOLS = [
 ] as const;
 
 /** Tools the Risk Checker Agent may call. */
-export const RISK_CHECKER_MCP_TOOLS = [MCP_TOOL_NAMES.riskPolicyLookup] as const;
+export const RISK_CHECKER_MCP_TOOLS = [
+	MCP_TOOL_NAMES.riskPolicyLookup,
+] as const;
 
 /** Generous per-request timeout: the Fly.io deployment scales to zero when idle. */
 const MCP_REQUEST_TIMEOUT_MS = 60_000;

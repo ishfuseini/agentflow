@@ -1,6 +1,6 @@
 import { OpenAIChatCompletionsModel } from "@openai/agents";
-import { env } from "$env/dynamic/private";
 import OpenAI from "openai";
+import { env } from "$env/dynamic/private";
 
 /**
  * Model providers for the pipeline's two routing tiers.

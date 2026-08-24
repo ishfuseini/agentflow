@@ -1,8 +1,5 @@
 import type { Model } from "@openai/agents";
-import {
-	createOllamaCloudModel,
-	createOpenRouterModel,
-} from "./providers";
+import { createOllamaCloudModel, createOpenRouterModel } from "./providers";
 
 export const ROUTING_MODES = ["cost", "intelligence"] as const;
 export type RoutingMode = (typeof ROUTING_MODES)[number];
@@ -38,5 +35,7 @@ export function resolveAgentModels(mode: RoutingMode): AgentModels {
 				architect: createOpenRouterModel(),
 				riskChecker: costModel,
 			};
+		default:
+			throw new Error(`Unknown routing mode: ${mode}`);
 	}
 }

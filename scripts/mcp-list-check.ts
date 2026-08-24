@@ -20,7 +20,8 @@ const EXPECTED_TOOLS = [
 /** Generous timeout: the Fly.io deployment scales to zero when idle. */
 const MCP_TIMEOUT_MS = 60_000;
 
-const url = process.env.AGENTFLOW_MCP_URL ?? "https://agentflow-mcp.fly.dev/mcp";
+const url =
+	process.env.AGENTFLOW_MCP_URL ?? "https://agentflow-mcp.fly.dev/mcp";
 
 const server = new MCPServerStreamableHttp({
 	url,

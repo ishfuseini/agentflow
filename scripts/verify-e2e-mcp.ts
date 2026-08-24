@@ -40,7 +40,9 @@ async function installLegacyMcpPatch(): Promise<void> {
 		const nextOptions = { ...options, prior: { kind: "legacy" } };
 		return originalConnect.call(this, transport, nextOptions);
 	};
-	console.log("[patch] MCP Client.connect defaulted to prior: { kind: 'legacy' }");
+	console.log(
+		"[patch] MCP Client.connect defaulted to prior: { kind: 'legacy' }",
+	);
 }
 
 await installLegacyMcpPatch();
@@ -68,7 +70,12 @@ if (!response.ok) {
 }
 
 const result = (await response.json()) as {
-	toolCalls?: Array<{ agent: string; tool: string; arguments: unknown; result: unknown }>;
+	toolCalls?: Array<{
+		agent: string;
+		tool: string;
+		arguments: unknown;
+		result: unknown;
+	}>;
 	qualifier?: Record<string, unknown>;
 	architect?: Record<string, unknown>;
 	riskChecker?: Record<string, unknown>;
@@ -81,16 +88,29 @@ if (result.error) {
 }
 
 console.log("--- Pipeline result ---");
-console.log(`Qualifier keys:    ${Object.keys(result.qualifier ?? {}).sort().join(", ")}`);
-console.log(`Architect keys:    ${Object.keys(result.architect ?? {}).sort().join(", ")}`);
-console.log(`Risk Checker keys: ${Object.keys(result.riskChecker ?? {}).sort().join(", ")}`);
+console.log(
+	`Qualifier keys:    ${Object.keys(result.qualifier ?? {})
+		.sort()
+		.join(", ")}`,
+);
+console.log(
+	`Architect keys:    ${Object.keys(result.architect ?? {})
+		.sort()
+		.join(", ")}`,
+);
+console.log(
+	`Risk Checker keys: ${Object.keys(result.riskChecker ?? {})
+		.sort()
+		.join(", ")}`,
+);
 console.log(`Tool calls:        ${result.toolCalls?.length ?? 0}\n`);
 
 // --- Assertions --------------------------------------------------------------
 const failures: string[] = [];
 function expect(condition: boolean, message: string): void {
-	if (condition) console.log(`  ✓ ${message}`);
-	else {
+	if (condition) {
+		console.log(`  ✓ ${message}`);
+	} else {
 		console.error(`  ✗ ${message}`);
 		failures.push(message);
 	}
@@ -100,40 +120,106 @@ const calls = result.toolCalls ?? [];
 const byTool = (name: string) => calls.find((c) => c.tool === name);
 
 console.log("1) Tool call presence and ownership");
-expect(byTool("arch_pattern_lookup")?.agent === "architect", "arch_pattern_lookup fired by Architect");
-expect(byTool("tool_selection_lookup")?.agent === "architect", "tool_selection_lookup fired by Architect");
-expect(byTool("brand_context_lookup")?.agent === "architect", "brand_context_lookup fired by Architect");
-expect(byTool("risk_policy_lookup")?.agent === "riskChecker", "risk_policy_lookup fired by Risk Checker");
+expect(
+	byTool("arch_pattern_lookup")?.agent === "architect",
+	"arch_pattern_lookup fired by Architect",
+);
+expect(
+	byTool("tool_selection_lookup")?.agent === "architect",
+	"tool_selection_lookup fired by Architect",
+);
+expect(
+	byTool("brand_context_lookup")?.agent === "architect",
+	"brand_context_lookup fired by Architect",
+);
+expect(
+	byTool("risk_policy_lookup")?.agent === "riskChecker",
+	"risk_policy_lookup fired by Risk Checker",
+);
 expect(calls.length === 4, `exactly 4 tool calls (got ${calls.length})`);
 
 console.log("\n2) Argument contracts");
-const ap = (byTool("arch_pattern_lookup")?.arguments ?? {}) as Record<string, unknown>;
-expect(typeof ap.industry === "string", "arch_pattern_lookup.industry is string");
+const ap = (byTool("arch_pattern_lookup")?.arguments ?? {}) as Record<
+	string,
+	unknown
+>;
+expect(
+	typeof ap.industry === "string",
+	"arch_pattern_lookup.industry is string",
+);
 expect(Array.isArray(ap.data_stack), "arch_pattern_lookup.data_stack is array");
-expect(Array.isArray(ap.constraints), "arch_pattern_lookup.constraints is array");
+expect(
+	Array.isArray(ap.constraints),
+	"arch_pattern_lookup.constraints is array",
+);
 
-const ts = (byTool("tool_selection_lookup")?.arguments ?? {}) as Record<string, unknown>;
-expect(typeof ts.use_case === "string", "tool_selection_lookup.use_case is string");
+const ts = (byTool("tool_selection_lookup")?.arguments ?? {}) as Record<
+	string,
+	unknown
+>;
+expect(
+	typeof ts.use_case === "string",
+	"tool_selection_lookup.use_case is string",
+);
 
-const bc = (byTool("brand_context_lookup")?.arguments ?? {}) as Record<string, unknown>;
-expect(bc.domain === scenario.domain, `brand_context_lookup.domain === "${scenario.domain}" (got ${JSON.stringify(bc.domain)})`);
+const bc = (byTool("brand_context_lookup")?.arguments ?? {}) as Record<
+	string,
+	unknown
+>;
+expect(
+	bc.domain === scenario.domain,
+	`brand_context_lookup.domain === "${scenario.domain}" (got ${JSON.stringify(bc.domain)})`,
+);
 
-const rp = (byTool("risk_policy_lookup")?.arguments ?? {}) as Record<string, unknown>;
-expect(typeof rp.industry === "string", "risk_policy_lookup.industry is string");
-expect(Array.isArray(rp.data_classification), "risk_policy_lookup.data_classification is array");
+const rp = (byTool("risk_policy_lookup")?.arguments ?? {}) as Record<
+	string,
+	unknown
+>;
+expect(
+	typeof rp.industry === "string",
+	"risk_policy_lookup.industry is string",
+);
+expect(
+	Array.isArray(rp.data_classification),
+	"risk_policy_lookup.data_classification is array",
+);
 expect(typeof rp.region === "string", "risk_policy_lookup.region is string");
 
 console.log("\n3) Result contracts");
-const apR = (byTool("arch_pattern_lookup")?.result ?? {}) as Record<string, unknown>;
-expect(typeof apR.pattern_id === "string", "arch_pattern_lookup returned pattern_id");
-expect(typeof apR.confidence === "number", "arch_pattern_lookup returned confidence");
+const apR = (byTool("arch_pattern_lookup")?.result ?? {}) as Record<
+	string,
+	unknown
+>;
+expect(
+	typeof apR.pattern_id === "string",
+	"arch_pattern_lookup returned pattern_id",
+);
+expect(
+	typeof apR.confidence === "number",
+	"arch_pattern_lookup returned confidence",
+);
 
-const bcR = (byTool("brand_context_lookup")?.result ?? {}) as Record<string, unknown>;
-expect(typeof bcR.company_name === "string", "brand_context_lookup returned company_name");
+const bcR = (byTool("brand_context_lookup")?.result ?? {}) as Record<
+	string,
+	unknown
+>;
+expect(
+	typeof bcR.company_name === "string",
+	"brand_context_lookup returned company_name",
+);
 
-const rpR = (byTool("risk_policy_lookup")?.result ?? {}) as Record<string, unknown>;
-expect(Array.isArray(rpR.required_controls), "risk_policy_lookup returned required_controls[]");
-expect(typeof rpR.hitl_required === "boolean", "risk_policy_lookup returned hitl_required");
+const rpR = (byTool("risk_policy_lookup")?.result ?? {}) as Record<
+	string,
+	unknown
+>;
+expect(
+	Array.isArray(rpR.required_controls),
+	"risk_policy_lookup returned required_controls[]",
+);
+expect(
+	typeof rpR.hitl_required === "boolean",
+	"risk_policy_lookup returned hitl_required",
+);
 expect(rpR.hitl_required === true, "Healthcare → hitl_required=true (PHI)");
 
 console.log("\n4) Data flow between agents");
@@ -147,7 +233,9 @@ expect(
 		JSON.stringify(ap).toLowerCase().includes("phi"),
 	"Architect's arch_pattern_lookup args include HIPAA/PHI",
 );
-const archPatternMatch = result.architect?.pattern_match as Record<string, unknown> | undefined;
+const archPatternMatch = result.architect?.pattern_match as
+	| Record<string, unknown>
+	| undefined;
 expect(
 	archPatternMatch?.confidence === apR.confidence,
 	`Architect.pattern_match.confidence (${archPatternMatch?.confidence}) matches tool result (${apR.confidence})`,
@@ -155,12 +243,20 @@ expect(
 
 console.log("\n=== Summary ===");
 if (failures.length === 0) {
-	console.log("✓ All 4 MCP tools fired with correct data flowing between agents");
+	console.log(
+		"✓ All 4 MCP tools fired with correct data flowing between agents",
+	);
 	console.log("\n architect.pattern_match:", JSON.stringify(archPatternMatch));
-	console.log(" risk_checker.overall:", (result.riskChecker as { overall_score?: number })?.overall_score);
+	console.log(
+		" risk_checker.overall:",
+		(result.riskChecker as { overall_score?: number } | undefined)
+			?.overall_score,
+	);
 	process.exit(0);
 } else {
 	console.error(`✗ ${failures.length} assertion(s) failed`);
-	for (const f of failures) console.error(`  - ${f}`);
+	for (const f of failures) {
+		console.error(`  - ${f}`);
+	}
 	process.exit(1);
 }
