@@ -125,6 +125,9 @@ const langfuseMocks = {
 			constructor(params) {
 				state().clients.push(params);
 				this.score = {
+					create(data) {
+						state().scores.push(data);
+					},
 					trace(observation, data) {
 						state().scores.push({
 							traceId: observation.traceId,
@@ -173,6 +176,7 @@ const langfuseMocks = {
 				this.usageDetails = attributes.usageDetails;
 				this.model = attributes.model;
 				this.ended = false;
+				this.endCount = 0;
 				this.updates = [];
 				state().observations.push(this);
 			}
@@ -193,6 +197,7 @@ const langfuseMocks = {
 			}
 			end() {
 				this.ended = true;
+				this.endCount += 1;
 			}
 		}
 
@@ -278,11 +283,14 @@ test("traceAgentRun initializes OTEL and logs an agent observation with child ge
 		const generation = findObservation(state, "Qualifier generation");
 		assert.equal(rootObservation.type, "agent");
 		assert.equal(rootObservation.ended, true);
+		assert.equal(rootObservation.endCount, 1);
 		assert.equal(rootObservation.metadata.runId, "run-1");
 		assert.equal(rootObservation.metadata.routingMode, "cost");
 		assert.equal(rootObservation.metadata.provider, "ollama-cloud");
 		assert.equal(generation.type, "generation");
 		assert.equal(generation.parentObservationId, rootObservation.id);
+		assert.equal(generation.ended, true);
+		assert.equal(generation.endCount, 1);
 		assert.deepEqual(generation.usageDetails, {
 			input: 12,
 			output: 34,
@@ -321,16 +329,21 @@ test("traceAgentRun logs ERROR observations and agent_success=0 when execution f
 		const rootObservation = findObservation(state, "agentflow.agent.architect");
 		const generation = findObservation(state, "Architect generation");
 		const errorEvent = findObservation(state, "agent_run_error");
+		assert.equal(rootObservation.ended, true);
+		assert.equal(rootObservation.endCount, 1);
 		assert.equal(rootObservation.level, "ERROR");
 		assert.equal(rootObservation.statusMessage, "agent failed");
+		assert.equal(generation.ended, true);
+		assert.equal(generation.endCount, 1);
 		assert.equal(generation.level, "ERROR");
 		assert.equal(generation.statusMessage, "agent failed");
 		assert.equal(errorEvent.type, "event");
+		assert.equal(errorEvent.ended, true);
+		assert.equal(errorEvent.endCount, 1);
 		assert.deepEqual(errorEvent.output, { error: "agent failed" });
 		assert.deepEqual(state.scores, [
 			{
 				traceId: rootObservation.traceId,
-				observationId: rootObservation.id,
 				name: "agent_success",
 				value: 0,
 			},
@@ -359,6 +372,8 @@ test("logHitlDecision creates a span, event metadata, and human latency score", 
 		const decisionEvent = findObservation(state, "hitl_gate_decision");
 		assert.equal(telemetryLogged, true);
 		assert.equal(rootObservation.type, "span");
+		assert.equal(rootObservation.ended, true);
+		assert.equal(rootObservation.endCount, 1);
 		assert.equal(rootObservation.metadata.runId, "run-hitl");
 		assert.equal(rootObservation.metadata.decision, "approved");
 		assert.equal(rootObservation.metadata.humanLatencyMs, 1234);
@@ -366,10 +381,11 @@ test("logHitlDecision creates a span, event metadata, and human latency score", 
 		assert.deepEqual(rootObservation.output, { finalPlan: pocPlan });
 		assert.equal(decisionEvent.type, "event");
 		assert.equal(decisionEvent.parentObservationId, rootObservation.id);
+		assert.equal(decisionEvent.ended, true);
+		assert.equal(decisionEvent.endCount, 1);
 		assert.deepEqual(state.scores, [
 			{
 				traceId: rootObservation.traceId,
-				observationId: rootObservation.id,
 				name: "human_latency_ms",
 				value: 1234,
 			},

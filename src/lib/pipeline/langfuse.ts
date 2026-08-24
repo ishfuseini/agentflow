@@ -96,7 +96,6 @@ function getLangfuseRuntime(): LangfuseRuntime | null {
 		secretKey: env.LANGFUSE_SECRET_KEY,
 		baseUrl: env.LANGFUSE_BASE_URL,
 		exportMode: "immediate",
-		exportMode: "immediate",
 		release: env.LANGFUSE_RELEASE,
 	});
 	const sdk = new NodeSDK({
@@ -209,7 +208,11 @@ function scoreTrace(
 	name: string,
 	value: number,
 ): void {
-	client.score.create({ traceId: observation.traceId, name: name, value: value });
+	client.score.create({
+		traceId: observation.traceId,
+		name,
+		value,
+	});
 }
 
 export async function traceAgentRun<TResult extends AgentRunTelemetryResult>({
@@ -307,7 +310,7 @@ export async function traceAgentRun<TResult extends AgentRunTelemetryResult>({
 						const usage = snapshotUsage(result.state.usage);
 						generation.update({
 							output: result.finalOutput ?? null,
-							usage: buildUsageDetails(result.state.usage),
+							usageDetails: buildUsageDetails(result.state.usage),
 							metadata: buildAgentMetadata(
 								runId,
 								agentKey,
