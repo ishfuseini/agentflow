@@ -1,6 +1,6 @@
 ## Purpose
 
-Displays per-agent Langfuse trace data (latency, tokens, cost, eval scores) as a progress row per agent below the node diagram, providing observability into each agent run and HITL decision. The trace panel is a `rounded-xl border border-darkgrey-400 bg-darkgrey-100/60` card. Tool calls are not shown here (they appear as collapsible rows inside agent NodeCards).
+Displays per-agent Langfuse trace data (latency, tokens, cost, eval scores) as a progress row per agent below the node diagram, providing observability into each agent run and HITL decision. The trace panel is a full-width `rounded-md border border-darkgrey-300 bg-background` card. Tool calls are not shown here.
 
 ## ADDED Requirements
 

@@ -12,7 +12,11 @@ import {
 	createAgentflowMcpServer,
 	RISK_CHECKER_MCP_TOOLS,
 } from "$lib/mcp/server";
-import { type AgentTraceRecord, traceAgentRun } from "./langfuse";
+import {
+	type AgentTraceRecord,
+	traceAgentRun,
+	tracePipelineRun,
+} from "./langfuse";
 import { type RoutingMode, resolveAgentModels } from "./routing";
 
 /** Agents that call MCP tools during a run (the Qualifier makes no tool calls). */
@@ -125,78 +129,92 @@ export async function runPipeline(
 		await architectServer.connect();
 		await riskCheckerServer.connect();
 
-		const { result: qualifierResult, trace: qualifierTrace } =
-			await traceAgentRun({
-				runId,
-				agentKey: "qualifier",
-				agentName: "Qualifier",
-				routingMode,
-				model: models.qualifier,
-				input: prompt,
-				execute: () =>
-					run(createQualifierAgent(models.qualifier.model), prompt),
-			});
-		const qualifierOutput: QualifierOutput = requireFinalOutput(
-			qualifierResult.finalOutput,
-			"Qualifier",
-		);
+		const { result } = await tracePipelineRun({
+			runId,
+			prompt,
+			routingMode,
+			execute: async () => {
+				const { result: qualifierResult, trace: qualifierTrace } =
+					await traceAgentRun({
+						runId,
+						agentKey: "qualifier",
+						agentName: "Qualifier",
+						routingMode,
+						model: models.qualifier,
+						input: prompt,
+						execute: () =>
+							run(createQualifierAgent(models.qualifier.model), prompt),
+					});
+				const qualifierOutput: QualifierOutput = requireFinalOutput(
+					qualifierResult.finalOutput,
+					"Qualifier",
+				);
 
-		const architectInput = domain
-			? `${JSON.stringify(qualifierOutput)}\n\nCustomer company domain hint — use verbatim as the "domain" argument for brand_context_lookup: ${domain}`
-			: JSON.stringify(qualifierOutput);
-		const { result: architectResult, trace: architectTrace } =
-			await traceAgentRun({
-				runId,
-				agentKey: "architect",
-				agentName: "Architect",
-				routingMode,
-				model: models.architect,
-				input: architectInput,
-				execute: () =>
-					run(
-						createArchitectAgent(models.architect.model, architectServer),
-						architectInput,
-					),
-			});
-		const architectOutput: ArchitectOutput = requireFinalOutput(
-			architectResult.finalOutput,
-			"Architect",
-		);
+				const architectInput = domain
+					? `${JSON.stringify(qualifierOutput)}\n\nCustomer company domain hint — use verbatim as the "domain" argument for brand_context_lookup: ${domain}`
+					: JSON.stringify(qualifierOutput);
+				const { result: architectResult, trace: architectTrace } =
+					await traceAgentRun({
+						runId,
+						agentKey: "architect",
+						agentName: "Architect",
+						routingMode,
+						model: models.architect,
+						input: architectInput,
+						execute: () =>
+							run(
+								createArchitectAgent(models.architect.model, architectServer),
+								architectInput,
+							),
+					});
+				const architectOutput: ArchitectOutput = requireFinalOutput(
+					architectResult.finalOutput,
+					"Architect",
+				);
 
-		const riskCheckerInput = JSON.stringify(architectOutput);
-		const { result: riskCheckerResult, trace: riskCheckerTrace } =
-			await traceAgentRun({
-				runId,
-				agentKey: "riskChecker",
-				agentName: "Risk Checker",
-				routingMode,
-				model: models.riskChecker,
-				input: riskCheckerInput,
-				execute: () =>
-					run(
-						createRiskCheckerAgent(models.riskChecker.model, riskCheckerServer),
-						riskCheckerInput,
-					),
-				getEvalScore: (result) => result.finalOutput?.overall_score,
-			});
-		const riskCheckerOutput: RiskCheckerOutput = requireFinalOutput(
-			riskCheckerResult.finalOutput,
-			"Risk Checker",
-		);
+				const riskCheckerInput = JSON.stringify(architectOutput);
+				const { result: riskCheckerResult, trace: riskCheckerTrace } =
+					await traceAgentRun({
+						runId,
+						agentKey: "riskChecker",
+						agentName: "Risk Checker",
+						routingMode,
+						model: models.riskChecker,
+						input: riskCheckerInput,
+						execute: () =>
+							run(
+								createRiskCheckerAgent(
+									models.riskChecker.model,
+									riskCheckerServer,
+								),
+								riskCheckerInput,
+							),
+						getEvalScore: (result) => result.finalOutput?.overall_score,
+					});
+				const riskCheckerOutput: RiskCheckerOutput = requireFinalOutput(
+					riskCheckerResult.finalOutput,
+					"Risk Checker",
+				);
+
+				return {
+					qualifier: qualifierOutput,
+					architect: architectOutput,
+					riskChecker: riskCheckerOutput,
+					toolCalls: [
+						...extractToolCalls("architect", architectResult.newItems),
+						...extractToolCalls("riskChecker", riskCheckerResult.newItems),
+					],
+					traces: [qualifierTrace, architectTrace, riskCheckerTrace],
+				};
+			},
+		});
 
 		return {
 			runId,
 			prompt,
 			routingMode,
 			...(domain ? { domain } : {}),
-			qualifier: qualifierOutput,
-			architect: architectOutput,
-			riskChecker: riskCheckerOutput,
-			toolCalls: [
-				...extractToolCalls("architect", architectResult.newItems),
-				...extractToolCalls("riskChecker", riskCheckerResult.newItems),
-			],
-			traces: [qualifierTrace, architectTrace, riskCheckerTrace],
+			...result,
 		};
 	} finally {
 		await Promise.allSettled([

@@ -19,4 +19,9 @@ export default defineConfig({
 			},
 		}),
 	],
+	ssr: {
+		// @lucide/svelte ships raw .svelte components; compile them during SSR
+		// instead of letting Node load the files directly.
+		noExternal: ["@lucide/svelte"],
+	},
 });
