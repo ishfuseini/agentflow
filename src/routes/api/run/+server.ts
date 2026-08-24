@@ -40,12 +40,13 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	try {
+		const runId = crypto.randomUUID();
 		const result = await runPipeline(
 			runRequest.prompt,
 			runRequest.routingMode,
 			runRequest.domain,
+			runId,
 		);
-		const runId = crypto.randomUUID();
 		if (shouldPauseForHitl(result)) {
 			const pending = await createPendingHitlRun(result, runId);
 			return json({

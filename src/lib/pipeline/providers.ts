@@ -18,40 +18,22 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 export const DEFAULT_COST_MODEL_ID = "gpt-oss:20b";
 export const INTELLIGENCE_MODEL_ID = "anthropic/claude-opus-4.8";
+export const OLLAMA_CLOUD_PROVIDER = "ollama-cloud";
+export const OPENROUTER_PROVIDER = "openrouter";
 
-/**
- * Local-test override. When `LLM_TEST_ENDPOINT` is set, the cost-tier model
- * resolves to that OpenAI-compatible endpoint (e.g. LM Studio / mlx-lm) using
- * `LLM_TEST_MODEL` and `LLM_TEST_KEY`, instead of Ollama Cloud. Lets the
- * pipeline run end-to-end without a paid Ollama Cloud / OpenRouter key.
- * Intelligence mode is unaffected — it still requires `OPENROUTER_API_KEY`.
- */
-function createTestModel(): OpenAIChatCompletionsModel | undefined {
-	const baseURL = env.LLM_TEST_ENDPOINT;
-	if (!baseURL) {
-		return undefined;
-	}
-	const apiKey = env.LLM_TEST_KEY ?? "test";
-	const modelId = env.LLM_TEST_MODEL;
-	if (!modelId) {
-		throw new Error(
-			"LLM_TEST_ENDPOINT is set but LLM_TEST_MODEL is not. Add both to .env.",
-		);
-	}
-	const client = new OpenAI({ baseURL, apiKey });
-	return new OpenAIChatCompletionsModel(client, modelId);
+export function getCostProviderName(): string {
+	return OLLAMA_CLOUD_PROVIDER;
+}
+
+export function getCostModelId(): string {
+	return env.OLLAMA_MODEL || DEFAULT_COST_MODEL_ID;
 }
 
 export function createOllamaCloudModel(): OpenAIChatCompletionsModel {
-	const testModel = createTestModel();
-	if (testModel) {
-		return testModel;
-	}
-
 	const apiKey = env.OLLAMA_CLOUD_API_KEY;
 	if (!apiKey) {
 		throw new Error(
-			"OLLAMA_CLOUD_API_KEY is not set. Add it to .env (see .env.example), or set LLM_TEST_ENDPOINT/LLM_TEST_MODEL to route to a local OpenAI-compatible model.",
+			"OLLAMA_CLOUD_API_KEY is not set. Add it to .env (see .env.example).",
 		);
 	}
 
@@ -59,10 +41,7 @@ export function createOllamaCloudModel(): OpenAIChatCompletionsModel {
 		baseURL: env.OLLAMA_ENDPOINT || DEFAULT_OLLAMA_BASE_URL,
 		apiKey,
 	});
-	return new OpenAIChatCompletionsModel(
-		client,
-		env.OLLAMA_MODEL || DEFAULT_COST_MODEL_ID,
-	);
+	return new OpenAIChatCompletionsModel(client, getCostModelId());
 }
 
 export function createOpenRouterModel(): OpenAIChatCompletionsModel {
