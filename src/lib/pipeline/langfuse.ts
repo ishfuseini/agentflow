@@ -95,7 +95,7 @@ function getLangfuseRuntime(): LangfuseRuntime | null {
 		publicKey: env.LANGFUSE_PUBLIC_KEY,
 		secretKey: env.LANGFUSE_SECRET_KEY,
 		baseUrl: env.LANGFUSE_BASE_URL,
-		flushAt: 1,
+		exportMode: "immediate",
 		exportMode: "immediate",
 		release: env.LANGFUSE_RELEASE,
 	});
