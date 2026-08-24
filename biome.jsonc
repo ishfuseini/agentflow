@@ -3,6 +3,39 @@
   "files": {
     "includes": ["!docs"]
   },
+  // Match what is already committed so the formatter does not rewrite every
+  // file (and the blame with it): TS/JS is tab-indented, CSS/HTML is spaces.
+  // Trailing commas are kept — they keep future diffs to a single line.
+  "formatter": {
+    "indentStyle": "tab"
+  },
+  "javascript": {
+    "formatter": {
+      "trailingCommas": "all"
+    }
+  },
+  "css": {
+    "formatter": {
+      "indentStyle": "space"
+    }
+  },
+  "html": {
+    "formatter": {
+      "indentStyle": "space"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        // Alphabetising fights ordering that carries meaning here: pipeline
+        // types are declared in execution order (qualifier -> architect ->
+        // riskChecker) and MCP tool args mirror each tool's documented
+        // signature. organizeImports stays on.
+        "useSortedKeys": "off",
+        "useSortedInterfaceMembers": "off"
+      }
+    }
+  },
   "overrides": [
     {
       "includes": ["src/app.d.ts"],
@@ -10,6 +43,16 @@
         "rules": {
           "style": {
             "noNamespace": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["scripts/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
           }
         }
       }

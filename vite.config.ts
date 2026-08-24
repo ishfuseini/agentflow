@@ -6,17 +6,17 @@ import { defineConfig } from "vite";
 const PATH_SEPARATOR = /[/\\]/;
 
 export default defineConfig({
-  plugins: [
-    tailwindcss(),
-    sveltekit({
-      adapter: adapter(),
-      compilerOptions: {
-        // Force runes mode for the project, except for libraries. Can be removed in svelte 6.
-        runes: ({ filename }) =>
-          filename.split(PATH_SEPARATOR).includes("node_modules")
-            ? undefined
-            : true,
-      },
-    }),
-  ],
+	plugins: [
+		tailwindcss(),
+		sveltekit({
+			adapter: adapter(),
+			compilerOptions: {
+				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
+				runes: ({ filename }) =>
+					filename.split(PATH_SEPARATOR).includes("node_modules")
+						? undefined
+						: true,
+			},
+		}),
+	],
 });

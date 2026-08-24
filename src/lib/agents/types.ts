@@ -33,12 +33,24 @@ export const PocPlanSchema = z.object({
 	resource_estimate: z.string(),
 });
 
+/** Architect Agent: outcome of the arch_pattern_lookup MCP call. */
+export const PatternMatchSchema = z.object({
+	/** pattern_id returned by the tool; "unknown" when the call failed entirely */
+	pattern_id: z.string(),
+	/** Match confidence: curated patterns >= 0.85, generic fallback < 0.5 */
+	confidence: z.number().min(0).max(1),
+	/** True when the match is low-confidence (confidence < 0.5) — no diagram renders */
+	weak_match: z.boolean(),
+});
+
 /** Architect Agent: deployment architecture + POC plan. */
 export const ArchitectOutputSchema = z.object({
 	/** One-paragraph deployment architecture description */
 	architecture_summary: z.string(),
 	/** The proposed POC plan */
 	poc_plan: PocPlanSchema,
+	/** Outcome of the arch_pattern_lookup tool call (flags weak matches for the pipeline) */
+	pattern_match: PatternMatchSchema,
 	/** Deployment specifics: residency, tenancy, networking, security touchpoints */
 	deployment_notes: z.string(),
 });
@@ -72,6 +84,7 @@ export const RiskCheckerOutputSchema = z.object({
 
 export type QualifierOutput = z.infer<typeof QualifierOutputSchema>;
 export type PocPlan = z.infer<typeof PocPlanSchema>;
+export type PatternMatch = z.infer<typeof PatternMatchSchema>;
 export type ArchitectOutput = z.infer<typeof ArchitectOutputSchema>;
 export type EvalScores = z.infer<typeof EvalScoresSchema>;
 export type RiskSeverity = z.infer<typeof RiskSeveritySchema>;

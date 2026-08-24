@@ -7,6 +7,8 @@ import type { RequestHandler } from "./$types";
 const RunRequestSchema = z.object({
 	prompt: z.string().min(1),
 	routingMode: z.enum(ROUTING_MODES).default("cost"),
+	/** Optional customer domain, passed through to the Architect's brand_context_lookup call */
+	domain: z.string().min(1).optional(),
 });
 
 type RunRequest = z.infer<typeof RunRequestSchema>;
@@ -29,14 +31,18 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json(
 			{
 				error:
-					'Expected body { "prompt": string (non-empty), "routingMode": "cost" | "intelligence" }',
+					'Expected body { "prompt": string (non-empty), "routingMode": "cost" | "intelligence", "domain"?: string }',
 			},
 			{ status: 400 },
 		);
 	}
 
 	try {
-		const result = await runPipeline(runRequest.prompt, runRequest.routingMode);
+		const result = await runPipeline(
+			runRequest.prompt,
+			runRequest.routingMode,
+			runRequest.domain,
+		);
 		return json(result);
 	} catch (error) {
 		const message =
