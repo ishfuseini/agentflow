@@ -1,6 +1,5 @@
 <script lang="ts">
   import "@xyflow/svelte/dist/style.css";
-  import { AlertTriangle, CheckCircle2 } from "@lucide/svelte";
   import {
     Background,
     BackgroundVariant,
@@ -11,11 +10,12 @@
     type NodeTypes,
     SvelteFlow,
   } from "@xyflow/svelte";
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import type { PocPlan } from "$lib/agents/types";
   import AgentNodeCard from "$lib/components/pipeline/agent-node-card.svelte";
   import ChatPanel from "$lib/components/pipeline/chat-panel.svelte";
   import ConnectorEdge from "$lib/components/pipeline/connector-edge.svelte";
+  import TracePanel from "$lib/components/pipeline/trace-panel.svelte";
   import type {
     AgentId,
     AgentNodeData,
@@ -24,10 +24,15 @@
     FinalPocOutputView,
     HitlCompletionResponse,
     PipelineResponse,
-    PipelineView,
     TraceSummaryRow,
     TraceTotals,
   } from "$lib/components/pipeline/types";
+  import {
+    type DiagramUnavailableReason,
+    diagramSourceFromToolCalls,
+    renderDiagramHtml,
+  } from "$lib/diagram/render";
+  import type { RunTraceSummary } from "$lib/pipeline/langfuse";
   import type { RoutingMode } from "$lib/pipeline/routing";
 
   const nodeTypes: NodeTypes = {
@@ -61,15 +66,19 @@
   let traceRows = $state<TraceSummaryRow[]>(createInitialTraceRows());
   let traceTotals = $state<TraceTotals>({
     latency: "--",
+    tokens: "--",
     cost: "--",
     eval: "--",
   });
   let finalOutput = $state<FinalPocOutputView | null>(null);
+  let diagramHtml = $state<string | null>(null);
+  let diagramUnavailable = $state<DiagramUnavailableReason | null>(null);
   let activeRunId = $state<string | null>(null);
   let editPlanOpen = $state(false);
   let editPlanText = $state("");
   let responseAppliedToken = $state(0);
   let runToken = 0;
+  let tracePollTimer: ReturnType<typeof setInterval> | null = null;
 
   const isInteractionLocked = $derived(
     runState === "running" || runState === "paused",
@@ -93,6 +102,10 @@
       window.removeEventListener("agentflow:approve", handleApprove);
       window.removeEventListener("agentflow:edit", handleEdit);
     };
+  });
+
+  onDestroy(() => {
+    stopTracePolling();
   });
 
   function createInitialAgentNodes(): AgentNodeData[] {
@@ -131,6 +144,7 @@
         label: "Qualifier",
         status: "pending",
         latency: "--",
+        tokens: "--",
         cost: "--",
         eval: "--",
       },
@@ -139,6 +153,7 @@
         label: "Architect",
         status: "pending",
         latency: "--",
+        tokens: "--",
         cost: "--",
         eval: "--",
       },
@@ -147,6 +162,7 @@
         label: "Risk Checker",
         status: "pending",
         latency: "--",
+        tokens: "--",
         cost: "--",
         eval: "--",
       },
@@ -221,10 +237,11 @@
   }
 
   function resetTraceTotals(): void {
-    traceTotals = { latency: "--", cost: "--", eval: "--" };
+    traceTotals = { latency: "--", tokens: "--", cost: "--", eval: "--" };
   }
 
   function resetConversation(): void {
+    stopTracePolling();
     runState = "idle";
     messages = [];
     agentNodes = createInitialAgentNodes();
@@ -232,6 +249,8 @@
     traceRows = createInitialTraceRows();
     resetTraceTotals();
     finalOutput = null;
+    diagramHtml = null;
+    diagramUnavailable = null;
     activeRunId = null;
     editPlanOpen = false;
     editPlanText = "";
@@ -240,11 +259,14 @@
   }
 
   function resetRunVisuals(): void {
+    stopTracePolling();
     agentNodes = createInitialAgentNodes();
     syncFlow();
     traceRows = createInitialTraceRows();
     resetTraceTotals();
     finalOutput = null;
+    diagramHtml = null;
+    diagramUnavailable = null;
     activeRunId = null;
     editPlanOpen = false;
     editPlanText = "";
@@ -299,47 +321,130 @@
     updateAgent("hitl", { state: "running" });
   }
 
-  function applyTraceRows(pipeline: PipelineView): void {
-    traceRows = traceRows.map((row) => {
-      const trace = pipeline.traces.find((item) => item.agent === row.id);
-      if (!trace) {
-        return row;
+  function applyTraceSummary(summary: RunTraceSummary): void {
+    traceRows = summary.agents.map((agent) => {
+      const previous = traceRows.find((row) => row.id === agent.agent);
+      const hasData = agent.latencyMs !== null || agent.tokenCount !== null;
+      const evalScore = agent.evalScore;
+      let status: TraceSummaryRow["status"] = previous?.status ?? "pending";
+      if (hasData) {
+        status = evalScore !== null && evalScore < 3 ? "warning" : "done";
       }
       return {
-        ...row,
-        status:
-          trace.evalScore !== undefined && trace.evalScore < 3
-            ? "warning"
-            : "done",
-        latency: `${(trace.latencyMs / 1000).toFixed(1)}s`,
+        id: agent.agent,
+        label: agent.label,
+        status,
+        latency:
+          agent.latencyMs === null
+            ? (previous?.latency ?? "--")
+            : `${(agent.latencyMs / 1000).toFixed(1)}s`,
+        tokens:
+          agent.tokenCount === null
+            ? (previous?.tokens ?? "--")
+            : agent.tokenCount.toLocaleString("en-US"),
         cost:
-          trace.costUsd === undefined ? "--" : `$${trace.costUsd.toFixed(4)}`,
-        eval: trace.evalScore === undefined ? "ok" : trace.evalScore.toFixed(1),
+          agent.costUsd === null
+            ? (previous?.cost ?? "--")
+            : `$${agent.costUsd.toFixed(4)}`,
+        eval:
+          evalScore === null ? (previous?.eval ?? "--") : evalScore.toFixed(1),
       };
     });
-    const { traces } = pipeline;
-    const totalMs = traces.reduce((sum, trace) => sum + trace.latencyMs, 0);
-    const totalCost = traces.reduce(
-      (sum, trace) => sum + (trace.costUsd ?? 0),
-      0,
-    );
-    const scored = traces.filter((trace) => trace.evalScore !== undefined);
-    const avgEval =
-      scored.length > 0
-        ? scored.reduce((sum, trace) => sum + (trace.evalScore ?? 0), 0) /
-          scored.length
-        : null;
+    if (summary.hitl) {
+      traceRows = [
+        ...traceRows,
+        {
+          id: "hitl",
+          label: "HITL Review",
+          status: "done",
+          latency: `${(summary.hitl.humanLatencyMs / 1000).toFixed(1)}s`,
+          tokens: "--",
+          cost: "--",
+          eval: summary.hitl.decision,
+        },
+      ];
+    }
     traceTotals = {
-      latency: `${(totalMs / 1000).toFixed(1)}s`,
-      cost: `$${totalCost.toFixed(4)}`,
-      eval: avgEval === null ? "--" : avgEval.toFixed(1),
+      latency:
+        summary.aggregate.latencyMs === null
+          ? "--"
+          : `${(summary.aggregate.latencyMs / 1000).toFixed(1)}s`,
+      tokens:
+        summary.aggregate.totalTokens === null
+          ? "--"
+          : summary.aggregate.totalTokens.toLocaleString("en-US"),
+      cost:
+        summary.aggregate.costUsd === null
+          ? "--"
+          : `$${summary.aggregate.costUsd.toFixed(4)}`,
+      eval:
+        summary.aggregate.evalScore === null
+          ? "--"
+          : summary.aggregate.evalScore.toFixed(1),
     };
+  }
+
+  async function refreshTraceTable(runId: string): Promise<void> {
+    try {
+      const response = await fetch(
+        `/api/traces?runId=${encodeURIComponent(runId)}`,
+      );
+      const payload = (await response.json()) as
+        | RunTraceSummary
+        | { error: string };
+      if (!response.ok || "error" in payload) {
+        throw new Error(
+          "error" in payload ? payload.error : "Failed to fetch traces",
+        );
+      }
+      if (payload.available && payload.found && payload.runId === activeRunId) {
+        applyTraceSummary(payload);
+      }
+    } catch {
+      // Best-effort refresh — keep the narrative placeholders on failure.
+    }
+  }
+
+  function startTracePolling(runId: string): void {
+    stopTracePolling();
+    tracePollTimer = setInterval(() => {
+      void refreshTraceTable(runId);
+    }, 1500);
+  }
+
+  function stopTracePolling(): void {
+    if (tracePollTimer !== null) {
+      clearInterval(tracePollTimer);
+      tracePollTimer = null;
+    }
+  }
+
+  /**
+   * Builds the architecture diagram from the run's MCP tool calls: diagram_data
+   * from arch_pattern_lookup, header brand from brand_context_lookup. A
+   * low-confidence pattern match carries no diagram_data and renders none.
+   */
+  function applyDiagram(pipeline: PipelineResponse["pipeline"]): void {
+    const source = diagramSourceFromToolCalls(pipeline.toolCalls);
+    diagramUnavailable = source.unavailable;
+    diagramHtml = source.diagram
+      ? renderDiagramHtml({
+          diagram: source.diagram,
+          brand: source.brand,
+          fallbackTitle: pipeline.architect.pattern_match.pattern_id.replace(
+            /_/g,
+            " ",
+          ),
+          subtitle: pipeline.architect.architecture_summary,
+        })
+      : null;
   }
 
   function applyPipelineData(response: PipelineResponse): void {
     responseAppliedToken = runToken;
     activeRunId = response.runId;
-    applyTraceRows(response.pipeline);
+    applyDiagram(response.pipeline);
+    void refreshTraceTable(response.runId);
     const highSeverityRisks =
       response.gate?.highSeverityRisks ??
       response.pipeline.riskChecker.risks.filter(
@@ -390,12 +495,15 @@
     runToken += 1;
     const token = runToken;
     responseAppliedToken = 0;
+    const runId = crypto.randomUUID();
+    activeRunId = runId;
+    startTracePolling(runId);
     startRunNarrative(token);
     try {
       const response = await fetch("/api/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt, routingMode, domain }),
+        body: JSON.stringify({ prompt, routingMode, domain, runId }),
       });
       const payload = (await response.json()) as
         | PipelineResponse
@@ -406,7 +514,9 @@
         );
       }
       applyPipelineData(payload);
+      stopTracePolling();
     } catch (error) {
+      stopTracePolling();
       responseAppliedToken = token;
       runState = "error";
       updateAgent("qualifier", { state: "warning" });
@@ -465,6 +575,9 @@
       runState = "completed";
       editPlanOpen = false;
       updateAgent("hitl", { state: "done" });
+      if (activeRunId) {
+        void refreshTraceTable(activeRunId);
+      }
       addMessage(
         "system",
         `HITL ${payload.decision}. Final POC plan is ready.`,
@@ -502,6 +615,8 @@
     >
       <ChatPanel
         canReset={runState !== "idle" || messages.length > 0}
+        {diagramHtml}
+        {diagramUnavailable}
         disabled={isInteractionLocked}
         {messages}
         onReset={resetConversation}
@@ -532,57 +647,7 @@
         </div>
 
         <div class="min-h-0 flex-1 overflow-hidden p-4">
-          <section
-            class="flex h-full min-h-0 flex-col rounded-md border border-darkgrey-300 bg-background p-3"
-          >
-            <div class="mb-3 flex shrink-0 items-center justify-between">
-              <h2 class="font-heading text-sm font-semibold text-darkcyan-700">
-                Trace Summary
-              </h2>
-              <span class="text-xs text-foreground-muted">{routingMode}</span>
-            </div>
-            <div class="min-h-0 flex-1 space-y-2 overflow-y-auto">
-              {#each traceRows as row (row.id)}
-                <div
-                  class="grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 rounded-sm bg-[color-mix(in_oklch,var(--color-background),white_42%)] px-2 py-1.5 text-xs"
-                >
-                  <span class="flex items-center gap-2 font-semibold">
-                    {#if row.status === "done"}
-                      <CheckCircle2
-                        aria-hidden="true"
-                        class="h-3.5 w-3.5 text-darkcyan-600"
-                      />
-                    {:else if row.status === "warning"}
-                      <AlertTriangle
-                        aria-hidden="true"
-                        class="h-3.5 w-3.5 text-sienna-600"
-                      />
-                    {:else}
-                      <span
-                        class={`h-2.5 w-2.5 rounded-full ${
-                          row.status === "running"
-                            ? "animate-pulse bg-rebeccapurple-500"
-                            : "bg-darkgrey-400"
-                        }`}
-                      ></span>
-                    {/if}
-                    {row.label}
-                  </span>
-                  <span>{row.latency}</span>
-                  <span>{row.cost}</span>
-                  <span>{row.eval}</span>
-                </div>
-              {/each}
-            </div>
-            <footer
-              class="mt-3 grid shrink-0 grid-cols-[1fr_auto_auto_auto] items-center gap-2 border-t-2 border-darkgrey-300 pt-2 text-xs font-semibold text-foreground-muted"
-            >
-              <span>Total</span>
-              <span>{traceTotals.latency}</span>
-              <span>{traceTotals.cost}</span>
-              <span>eval {traceTotals.eval}</span>
-            </footer>
-          </section>
+          <TracePanel {routingMode} rows={traceRows} totals={traceTotals} />
         </div>
       </section>
     </div>

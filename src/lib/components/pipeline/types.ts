@@ -41,12 +41,14 @@ export interface TraceSummaryRow {
 	label: string;
 	status: "pending" | "running" | "done" | "warning";
 	latency: string;
+	tokens: string;
 	cost: string;
 	eval: string;
 }
 
 export interface TraceTotals {
 	latency: string;
+	tokens: string;
 	cost: string;
 	eval: string;
 }

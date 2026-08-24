@@ -153,7 +153,7 @@ const pendingHitlRunStore = new FilePendingHitlRunStore(
 
 export async function createPendingHitlRun(
 	pipeline: PipelineResult,
-	runId = crypto.randomUUID(),
+	runId: string = crypto.randomUUID(),
 ): Promise<PendingHitlRun> {
 	await pendingHitlRunStore.cleanupExpired();
 
