@@ -106,12 +106,14 @@ The pipeline SHALL be triggered via an API endpoint that accepts a prompt and ro
 - **WHEN** a POST request is sent to the pipeline API endpoint with a prompt and routing mode
 - **THEN** the pipeline SHALL execute all three agents sequentially and return the final structured POC plan with architecture, risks, and evaluation
 
-### Requirement: Langfuse Tracing Per Agent
+### Requirement: Langfuse Tracing Per Run
 
-Every agent run SHALL be wrapped in a Langfuse trace capturing latency, token count, cost, and eval score. Each trace SHALL be scoped to a dedicated Langfuse project for this app, separate from other apps sharing the same Langfuse instance.
+Each pipeline run SHALL be wrapped in a single Langfuse trace (named `agentflow.pipeline`, scoped by sessionId = runId) containing one nested observation per agent run. Each agent observation SHALL capture latency, token count, cost, and eval score. The trace SHALL be scoped to a dedicated Langfuse project for this app, separate from other apps sharing the same Langfuse instance.
 
-#### Scenario: Agent run produces Langfuse trace
+#### Scenario: Pipeline run produces one trace with agent observations
 
-- **WHEN** any agent in the pipeline executes
-- **THEN** a Langfuse trace SHALL be created for that agent run containing latency, token count, cost, and eval score
+- **WHEN** the pipeline executes
+- **THEN** a single Langfuse trace SHALL be created for the run, named `agentflow.pipeline` and scoped by the run id
+- **AND** the trace SHALL contain one nested observation per agent (Qualifier, Architect, Risk Checker)
+- **AND** each agent observation SHALL contain latency, token count, cost, and eval score
 - **AND** the trace SHALL be associated with this app's dedicated Langfuse project

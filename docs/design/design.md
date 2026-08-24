@@ -42,32 +42,31 @@
 
 ## Layout
 
-Three-column grid at full viewport. Columns separated by `divide-x-2 divide-darkgrey-400`.
+Two-column grid at full viewport. Columns separated by `divide-x-2 divide-darkgrey-400`. There is no third output column — the final POC plan renders in the Chat column's Results tab.
 
 ```
-┌──────────────┬────────────────────────────────┬──────────────┐
-│  Chat        │  Live Pipeline   (flex: 3)     │  Structured  │
-│  1/4         │                                │  Output      │
-│              │────────────────────────────────│  1/4         │
-│              │  Trace & Token Stream (flex:1) │              │
-└──────────────┴────────────────────────────────┴──────────────┘
+┌──────────────────┬──────────────────────────────────────┐
+│  Chat (450px)    │  Live Pipeline                       │
+│                  │                                      │
+│  Quick scenarios │  Node graph (compact nodes, flex: 3) │
+│  [Chat | Results]│──────────────────────────────────────│
+│  tabs            │  Trace Summary (full width, flex: 1) │
+│  conversation /  │                                      │
+│  POC plan        │                                      │
+└──────────────────┴──────────────────────────────────────┘
 ```
 
-**Col 1 — Chat (25%)**
+**Col 1 — Chat (450px)**
 - Quick scenario buttons fixed at top
 - `<hr>` (`border-t-2`) divider
-- "Agent Chat" `<h4>` header
+- `Chat | Results` tab bar — Chat tab shows the conversation thread, Results tab shows the POC plan
 - Scrollable conversation thread (`flex flex-col justify-end`) — messages anchor to bottom, grow upward
 - Input row + send button pinned to bottom (`border-t-2`)
 - "← New conversation" reset link appears after a run
 
-**Col 2 — Pipeline (50%)**
-- Top `flex: 3` — node graph, `border-b-2 border-darkgrey-400`
-- Bottom `flex: 1` — trace panel + LLM stream blocks
-
-**Col 3 — Output (25%)**
-- Section header with inline `text-sm` description ("Awaiting Results")
-- Populates with POC plan sections after HITL gate clears
+**Col 2 — Pipeline (remaining width)**
+- Top `flex: 3` — node graph with compact nodes, `border-b-2 border-darkgrey-400`
+- Bottom `flex: 1` — full-width trace summary with aggregate footer
 
 **Border weights**
 - Header bottom: `border-b-4`
@@ -78,9 +77,9 @@ Three-column grid at full viewport. Columns separated by `divide-x-2 divide-dark
 
 ## Components
 
-### NodeCard
+### NodeCard (compact)
 
-Four nodes in sequence: Qualifier → Architect → Risk Checker → HITL Gate. Each is `border-2 rounded-xl`.
+Four compact nodes in sequence: Qualifier → Architect → Risk Checker → HITL Gate. Each is `border-2 rounded-md`. Agent nodes render at ~160px wide and show only the label (`text-sm`) + status indicator — the subtitle appears as a hover tooltip. No step progress, no tool-call rows, no streaming text inside the graph. The HITL Gate node renders ~200px wide so it can host the interactive review panel when paused. All nodes stay readable.
 
 | Status | Border | Background | Glow ring |
 |--------|--------|------------|-----------|
@@ -90,15 +89,15 @@ Four nodes in sequence: Qualifier → Architect → Risk Checker → HITL Gate. 
 | warning | `sienna-400` | `sienna-50` | — |
 | paused | `sienna-500` | `sienna-50` | amber `0_0_0_3px` |
 
-**StatusDot** — inline indicator left of node label:
+**StatusDot** — inline indicator right of node label:
 - idle: grey circle
 - running: pulsing `rebeccapurple-400` ping + solid core
 - done: `CheckCircle2` in `darkcyan-600`
 - warning / paused: `AlertTriangle` in `sienna-500`
 
-**Tool calls** — collapsible rows inside the card, visible once node is active. Each shows `Zap` icon + `name()` + `ChevronDown`. Expand reveals result text with `→` prefix. Uses `AnimatePresence` for height animation.
+**Node tooltip** — hovering a node shows its subtitle as a `text-[10px]` tooltip above the card.
 
-**HITL Gate** — when `paused`: shows "PAUSED — awaiting review" inline text + Approve (primary) / Edit (ghost) buttons. Auto-advances after 4s in demo mode.
+**HITL Gate** — when `paused`: shows "PAUSED — awaiting review" inline text + Approve (primary) / Edit (ghost) buttons, the risk summary, the `review_reason`, and the proposed POC plan scope. The gate waits for explicit user action (no auto-advance in the live demo).
 
 ### ConnectorLine
 
@@ -106,18 +105,19 @@ Vertical `w-px` line between nodes using `darkcyan-500`. Animates `scaleY 0→1`
 
 ### TracePanel
 
-Rendered inside a `rounded-xl border border-darkgrey-400 bg-darkgrey-100/60` card. One row per completed agent showing: status icon · label · latency · cost · ✓/⚠. Footer shows totals: time · cost · eval 4.2/5.
+Rendered full-width below the node graph inside a `rounded-md border border-darkgrey-300 bg-background` card. One row per completed agent showing: status icon · label · latency · cost · eval ✓/⚠. Footer shows totals: time · cost · eval 4.2/5. The routing mode displays in the panel header.
 
 ### LLMStreamBlock
 
-Per-agent simulated token stream. Types out at 3 chars / 18ms. Shows a blinking `rebeccapurple-500` cursor while streaming, `CheckCircle2` in `darkcyan-600` when done. Card header uses `bg-darkgrey-200/50`.
+Removed from the live layout — the trace summary and chat system messages carry per-agent progress. The component remains in the repo for optional reuse.
 
 ### OutputPanel
 
-Populates four sections (Use cases · Success criteria · Exit criteria · Risks) with staggered `motion` entrance (`delay: si * 0.12`). Each item has a `rebeccapurple-500` bullet dot. Shows "POC Plan" heading with a `darkcyan` "draft" pill. Returns `null` until pipeline completes.
+Renders inside the Chat column's Results tab. Populates four sections (Use cases · Success criteria · Exit criteria · Risks) with staggered `motion` entrance (`delay: si * 0.12`). Each item has a `rebeccapurple-500` bullet dot. Shows "POC Plan" heading with a `darkcyan` "draft" pill. Shows an "Awaiting Results" empty state until the pipeline completes.
 
 ### Chat Panel
 
+- **Tabs**: `Chat | Results` segmented toggle below the scenario buttons. Chat shows the conversation thread + input; Results shows the OutputPanel.
 - **Scenario buttons**: `border border-darkgrey-400`, hover → `bg-darkgrey-200 border-rebeccapurple-300`. Disabled during pipeline run.
 - **User bubbles**: `bg-rebeccapurple-500 text-white rounded-br-sm`, right-aligned
 - **System bubbles**: `bg-darkgrey-200 text-foreground rounded-bl-sm`, left-aligned
