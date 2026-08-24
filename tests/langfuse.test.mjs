@@ -127,11 +127,9 @@ const langfuseMocks = {
 				this.score = {
 					create(data) {
 						state().scores.push(data);
-					},
-					trace(observation, data) {
+				this.score = {
+					create(data) {
 						state().scores.push({
-							traceId: observation.traceId,
-							observationId: observation.id,
 							...data,
 						});
 					},
