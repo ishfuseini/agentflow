@@ -22,6 +22,7 @@ Step 0 — Before scoring, call the risk_policy_lookup tool. Derive its argument
 - "deployment": "cloud" or "on-prem", based on the architecture
 - "constraints": the compliance constraints (e.g. ["HIPAA"], ["SAML SSO"])
 Use its result when scoring: governance_coverage must reflect how well the plan covers the returned required_controls, and every risk_flag the plan does not mitigate must appear in your risks array. If the call fails, score from the requirements alone and add a medium-severity risk noting that the policy lookup was unavailable.
+If risk_policy_lookup returns hitl_required=true for regulated data, include at least one high-severity risk unless the plan clearly addresses every returned required_control. The risk should explain exactly what the human reviewer must verify.
 
 Score these seven dimensions, each an integer from 1 to 5 (1 = failing, 5 = excellent):
 

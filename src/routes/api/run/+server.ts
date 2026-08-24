@@ -1,5 +1,7 @@
 import { json } from "@sveltejs/kit";
 import { z } from "zod";
+import { buildFinalPocOutput, shouldPauseForHitl } from "$lib/pipeline/hitl";
+import { createPendingHitlRun } from "$lib/pipeline/hitl-state";
 import { runPipeline } from "$lib/pipeline/orchestrator";
 import { ROUTING_MODES } from "$lib/pipeline/routing";
 import type { RequestHandler } from "./$types";
@@ -43,7 +45,22 @@ export const POST: RequestHandler = async ({ request }) => {
 			runRequest.routingMode,
 			runRequest.domain,
 		);
-		return json(result);
+		if (shouldPauseForHitl(result)) {
+			const pending = createPendingHitlRun(result);
+			return json({
+				status: "paused",
+				runId: pending.runId,
+				gate: pending.gate,
+				pipeline: result,
+			});
+		}
+
+		return json({
+			status: "completed",
+			runId: crypto.randomUUID(),
+			finalOutput: buildFinalPocOutput(result, result.architect.poc_plan),
+			pipeline: result,
+		});
 	} catch (error) {
 		const message =
 			error instanceof Error ? error.message : "Pipeline execution failed";
