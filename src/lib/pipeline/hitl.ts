@@ -151,6 +151,35 @@ function isComparableObject(value: unknown): value is Record<string, unknown> {
 	return isRecord(value);
 }
 
+function diffArrayValues(
+	before: readonly unknown[],
+	after: readonly unknown[],
+	path: string,
+): JsonDiffEntry[] {
+	const maxLength = Math.max(before.length, after.length);
+	const entries: JsonDiffEntry[] = [];
+	for (let index = 0; index < maxLength; index += 1) {
+		entries.push(
+			...diffValues(before[index], after[index], `${path}[${index}]`),
+		);
+	}
+	return entries;
+}
+
+function diffObjectValues(
+	before: Record<string, unknown>,
+	after: Record<string, unknown>,
+	path: string,
+): JsonDiffEntry[] {
+	const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+	const entries: JsonDiffEntry[] = [];
+	for (const key of keys) {
+		const childPath = path ? `${path}.${key}` : key;
+		entries.push(...diffValues(before[key], after[key], childPath));
+	}
+	return entries;
+}
+
 function diffValues(
 	before: unknown,
 	after: unknown,
@@ -161,24 +190,11 @@ function diffValues(
 	}
 
 	if (Array.isArray(before) && Array.isArray(after)) {
-		const maxLength = Math.max(before.length, after.length);
-		const entries: JsonDiffEntry[] = [];
-		for (let index = 0; index < maxLength; index += 1) {
-			entries.push(
-				...diffValues(before[index], after[index], `${path}[${index}]`),
-			);
-		}
-		return entries;
+		return diffArrayValues(before, after, path);
 	}
 
 	if (isComparableObject(before) && isComparableObject(after)) {
-		const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
-		const entries: JsonDiffEntry[] = [];
-		for (const key of keys) {
-			const childPath = path ? `${path}.${key}` : key;
-			entries.push(...diffValues(before[key], after[key], childPath));
-		}
-		return entries;
+		return diffObjectValues(before, after, path);
 	}
 
 	return [{ path, before, after }];
