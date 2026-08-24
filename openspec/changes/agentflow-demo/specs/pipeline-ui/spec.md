@@ -1,6 +1,6 @@
 ## Purpose
 
-Interactive web UI built with SvelteKit that renders the agent pipeline as a compact live node diagram, provides a chat-based interface for triggering pipeline runs, displays the final POC plan in a Results tab, and provides a routing strategy toggle. The binding visual spec is `docs/design/design.md` + `wireframe.md` (typography: Cabin/Inconsolata; OKLCH color tokens in `src/styles/theme.css`; 2-column layout).
+Interactive web UI built with SvelteKit that renders the agent pipeline as a compact live node diagram, provides a chat-based interface for triggering pipeline runs, and displays the final POC plan in a Results tab. The binding visual spec is `docs/design/design.md` + `wireframe.md` (typography: Cabin/Inconsolata; OKLCH color tokens in `src/styles/theme.css`; 2-column layout).
 
 ## ADDED Requirements
 
@@ -104,16 +104,6 @@ The Results tab SHALL render the final structured POC plan output with a "POC Pl
 - **WHEN** the pipeline completes (after HITL gate approval)
 - **THEN** the Results tab SHALL render the structured POC plan including named use cases, success criteria, exit criteria, risks, and architecture summary
 - **AND** the four sections SHALL enter with a staggered animation
-
-### Requirement: Routing Strategy Toggle
-
-The UI SHALL provide a toggle between "Cost: Ollama Cloud (gpt-oss:20b)" and "Intelligence: OpenRouter (claude-opus-4-8)". The toggle state SHALL be visible in traces and SHALL affect model selection for the next pipeline run.
-
-#### Scenario: User toggles to intelligence mode
-
-- **WHEN** the user toggles from "Cost" to "Intelligence"
-- **THEN** the next pipeline run SHALL use claude-opus-4-8 for the Architect Agent
-- **AND** the toggle state SHALL be reflected in Langfuse traces
 
 ### Requirement: Full-Width Trace Summary
 
