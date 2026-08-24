@@ -77,8 +77,11 @@
   let editPlanOpen = $state(false);
   let editPlanText = $state("");
   let responseAppliedToken = $state(0);
+  /** Gap between trace refreshes; each poll starts only after the last lands. */
+  const TRACE_POLL_INTERVAL_MS = 1500;
   let runToken = 0;
-  let tracePollTimer: ReturnType<typeof setInterval> | null = null;
+  let tracePollTimer: ReturnType<typeof setTimeout> | null = null;
+  let tracePollActive = false;
 
   const isInteractionLocked = $derived(
     runState === "running" || runState === "paused",
@@ -405,16 +408,29 @@
     }
   }
 
+  /**
+   * Polls with a chained timeout rather than setInterval: a slow Langfuse
+   * response would otherwise let requests overlap, and two in-flight refreshes
+   * can resolve out of order and apply a stale summary over a newer one.
+   */
   function startTracePolling(runId: string): void {
     stopTracePolling();
-    tracePollTimer = setInterval(() => {
-      void refreshTraceTable(runId);
-    }, 1500);
+    tracePollActive = true;
+    const scheduleNext = () => {
+      tracePollTimer = setTimeout(async () => {
+        await refreshTraceTable(runId);
+        if (tracePollActive) {
+          scheduleNext();
+        }
+      }, TRACE_POLL_INTERVAL_MS);
+    };
+    scheduleNext();
   }
 
   function stopTracePolling(): void {
+    tracePollActive = false;
     if (tracePollTimer !== null) {
-      clearInterval(tracePollTimer);
+      clearTimeout(tracePollTimer);
       tracePollTimer = null;
     }
   }
