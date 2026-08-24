@@ -62,34 +62,38 @@
 
 # 7. Trace Panel
 
-- [ ] 7.1 Implement a Langfuse API client that fetches trace data for a given pipeline run. Verify the client authenticates and returns trace data from the Langfuse API
-- [ ] 7.2 Create the trace panel component below the node diagram as a `rounded-xl border border-darkgrey-400 bg-darkgrey-100/60` card. One row per agent: status icon · label · latency · cost · ✓/⚠. Footer shows totals: time · cost · eval. Verify the panel renders with a header and empty state before a pipeline run
-- [ ] 7.3 Render per-node trace data: each agent row shows agent name, latency (seconds), token count, cost (USD), and eval score. Verify the 3 agent rows appear with correct data after a pipeline run
-- [ ] 7.4 Tool calls do not appear in the trace panel (they appear as collapsible rows inside agent NodeCards). Verify no tool-call child rows render in the trace panel
-- [ ] 7.5 Render the HITL trace row showing human latency and decision (approved/edited). Verify the HITL row appears after the user acts at the gate
-- [ ] 7.6 Render the pipeline aggregate row showing total compute time, total cost, and pipeline eval score. Verify the aggregate row sums agent latencies and costs correctly
-- [ ] 7.7 Implement real-time trace updates: trace rows appear as each node completes, not all at once. Verify the Qualifier trace row appears immediately when the Qualifier completes, before the Architect finishes
+- [x] 7.1 Implement a Langfuse API client that fetches trace data for a given pipeline run. Verify the client authenticates and returns trace data from the Langfuse API
+- [x] 7.2 Create the trace panel component below the node diagram as a `rounded-xl border border-darkgrey-400 bg-darkgrey-100/60` card. One row per agent: status icon · label · latency · cost · ✓/⚠. Footer shows totals: time · cost · eval. Verify the panel renders with a header and empty state before a pipeline run
+- [x] 7.3 Render per-node trace data: each agent row shows agent name, latency (seconds), token count, cost (USD), and eval score. Verify the 3 agent rows appear with correct data after a pipeline run
+- [x] 7.4 Tool calls do not appear in the trace panel (they appear as collapsible rows inside agent NodeCards). Verify no tool-call child rows render in the trace panel
+- [x] 7.5 Render the HITL trace row showing human latency and decision (approved/edited). Verify the HITL row appears after the user acts at the gate
+- [x] 7.6 Render the pipeline aggregate row showing total compute time, total cost, and pipeline eval score. Verify the aggregate row sums agent latencies and costs correctly
+- [x] 7.7 Implement real-time trace updates: trace rows appear as each node completes, not all at once. Verify the Qualifier trace row appears immediately when the Qualifier completes, before the Architect finishes
 - [ ] 7.8 Verify trace data in the panel matches traces visible in the Langfuse dashboard for the same run. Compare latency, tokens, and cost values between the panel and dashboard
 
 # 8. Architecture Diagram Rendering
 
-- [ ] 8.1 Implement the diagram_data → SVG renderer following the architecture-diagram skill design system (`docs/agent/architecture-diagram/SKILL.md`): dark theme, grid background, JetBrains Mono font, rounded component rects. Verify a test diagram renders as standalone HTML with inline CSS/SVG
-- [ ] 8.2 Implement component rendering from `diagram_data.components`: each component renders as a rounded rect with name, sublabel, and zone, using the double-rect masking technique. Verify components render with correct positioning and labels
-- [ ] 8.3 Apply the semantic component color palette: cyan=frontend, emerald=backend, violet=database, amber=cloud, rose=security, orange=message bus, slate=external. Verify database components use violet and security components use rose
-- [ ] 8.4 Implement connection rendering from `diagram_data.connections`: arrows with labels, dashed rose for security flows. Verify connections render as arrows with correct labels and styles
-- [ ] 8.5 Implement boundary rendering from `diagram_data.boundaries`: large dashed amber boxes for regions. Verify boundary boxes render around the correct components
-- [ ] 8.6 Implement the branded diagram header: company logo (from `brand_context_lookup` logo_url) and company name. Brand colors used only for header accent, not components. Verify the header shows logo + name for a scenario with brand context
-- [ ] 8.7 Implement fallback when no diagram_data (low-confidence match): no diagram rendered, UI indicates no diagram available. Verify a custom prompt with no pattern match shows no diagram and a weak-match indicator
-- [ ] 8.8 Implement fallback when brand context unavailable: diagram renders with default header (pattern name or scenario name), no logo. Verify a diagram renders without a logo when brand_context_lookup returns unavailable
-- [ ] 8.9 Verify the Healthcare and FSI Governance scenarios render full architecture diagrams with components, connections, boundaries, and branded headers (matching the healthcare_patient_insights and fsi_governance_copilot patterns from the MCP)
+- [x] 8.1 Implement the diagram_data → SVG renderer following the architecture-diagram skill design system (`docs/agent/architecture-diagram/SKILL.md`): dark theme, grid background, JetBrains Mono font, rounded component rects. Verify a test diagram renders as standalone HTML with inline CSS/SVG
+- [x] 8.2 Implement component rendering from `diagram_data.components`: each component renders as a rounded rect with name, sublabel, and zone, using the double-rect masking technique. Verify components render with correct positioning and labels
+- [x] 8.3 Apply the semantic component color palette: cyan=frontend, emerald=backend, violet=database, amber=cloud, rose=security, orange=message bus, slate=external. Verify database components use violet and security components use rose
+- [x] 8.4 Implement connection rendering from `diagram_data.connections`: arrows with labels, dashed rose for security flows. Verify connections render as arrows with correct labels and styles
+- [x] 8.5 Implement boundary rendering from `diagram_data.boundaries`: large dashed amber boxes for regions. Verify boundary boxes render around the correct components
+- [x] 8.6 Implement the branded diagram header: company logo (from `brand_context_lookup` logo_url) and company name. Brand colors used only for header accent, not components. Verify the header shows logo + name for a scenario with brand context
+- [x] 8.7 Implement fallback when no diagram_data (low-confidence match): no diagram rendered, UI indicates no diagram available. Verify a custom prompt with no pattern match shows no diagram and a weak-match indicator
+- [x] 8.8 Implement fallback when brand context unavailable: diagram renders with default header (pattern name or scenario name), no logo. Verify a diagram renders without a logo when brand_context_lookup returns unavailable
+- [x] 8.9 Verify the Healthcare and FSI Governance scenarios render full architecture diagrams with components, connections, boundaries, and branded headers (matching the healthcare_patient_insights and fsi_governance_copilot patterns from the MCP)
 
-# 9. Deployment
+# 9. Chat, Node Steps, and Flat Trace Table (phase 7 follow-up)
 
-- [ ] 9.1 Configure Fly.io deployment (`fly.toml`) for the SvelteKit app with `adapter-node`. Verify the app deploys via `fly deploy` and is accessible on the Fly.io domain with automatic TLS
-- [ ] 9.2 Configure custom domain `agents.ishlab.dev` on Fly.io. Verify the domain resolves and serves the app with automatic TLS
-- [ ] 9.3 Smoke test from an external network: open `agents.ishlab.dev` in a browser. Verify the page loads and the chat panel is visible
-- [ ] 9.4 Run all 4 scenarios end-to-end on the deployed instance. Verify each scenario completes without errors: pipeline runs, HITL gate fires, final output renders, traces appear in both the app and Langfuse dashboard
-- [ ] 9.5 Record a 60-90s screen capture of a clean successful run as a fallback for interviews. Verify the recording exists and shows a full pipeline run from scenario selection to final output
+- [ ] 9.1 Render agent results and the final POC plan as system bubbles in the chat thread, not status lines only. Verify each agent's output and the approved plan appear as left-aligned system bubbles in the conversation
+- [ ] 9.2 Auto-switch the chat panel to the Results tab when the pipeline completes. Verify the panel moves from Chat to Results on completion without a click, and the user can switch back
+- [ ] 9.3 Restore the step counter + step markers on agent NodeCards (Qualifier 1 step, Architect 4, Risk Checker 3). Verify the Architect card advances 1/4 → 2/4 → 3/4 → 4/4 during a run
+- [ ] 9.4 Restore per-step / tool-call detail rows inside agent NodeCards; the card expands as each step lands. Verify `arch_pattern_lookup`, `tool_selection_lookup`, and `brand_context_lookup` rows appear inside the Architect card
+- [ ] 9.5 Replace the per-agent trace table with flat observation rows (name · type · latency · tokens · cost · level) in chronological order, keeping the totals footer. Verify SPAN, AGENT, GENERATION, and EVENT rows each render as their own row with no per-agent grouping
+- [ ] 9.6 Verify the panel's observation rows match the Langfuse export for the same run (supersedes 7.8). Compare names, types, latencies, and costs against a `lf-events-export` JSON for that run
+- [ ] 9.7 Add an Orchestrator node that dispatches to each agent via numbered, labelled edges (1 qualify → 2 architect → 3 risk check → 4 review) with return edges. Verify the active dispatch edge highlights during its step and the return edge activates when the agent hands back
+- [ ] 9.8 Add an MCP Tools node with dashed edges from the Architect and Risk Checker (none from the Qualifier). Verify the edge activates while a tool call is in flight
+- [ ] 9.9 Add the chat entry greeting bubble (names the 3 agents, the MCP tool step, and the HITL gate) and a descriptive input placeholder. Verify both appear on load and restore after "← New conversation"
 
 # 10. UI Refinement — Decluttered Layout (phase 6 follow-up)
 
@@ -101,3 +105,11 @@
 - [x] 10.6 Default the node graph viewport to fit-then-one-click-out on load (fitView + zoomOut in oninit)
 - [x] 10.7 Widen the Chat column to 360px; move node subtitles to hover tooltips (visible paragraph removed)
 - [x] 10.8 Restructure Langfuse tracing to one trace per pipeline run (`agentflow.pipeline`, sessionId = runId) with nested per-agent observations; enrich trace records with token count, estimated cost, and eval score
+
+# 11. Deployment
+
+- [ ] 9.1 Configure Fly.io deployment (`fly.toml`) for the SvelteKit app with `adapter-node`. Verify the app deploys via `fly deploy` and is accessible on the Fly.io domain with automatic TLS
+- [ ] 9.2 Configure custom domain `agents.ishlab.dev` on Fly.io. Verify the domain resolves and serves the app with automatic TLS
+- [ ] 9.3 Smoke test from an external network: open `agents.ishlab.dev` in a browser. Verify the page loads and the chat panel is visible
+- [ ] 9.4 Run all 4 scenarios end-to-end on the deployed instance. Verify each scenario completes without errors: pipeline runs, HITL gate fires, final output renders, traces appear in both the app and Langfuse dashboard
+- [ ] 9.5 Record a 60-90s screen capture of a clean successful run as a fallback for interviews. Verify the recording exists and shows a full pipeline run from scenario selection to final output
