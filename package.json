@@ -10,7 +10,8 @@
     "dev": "vite dev",
     "fix": "ultracite fix",
     "prepare": "svelte-kit sync || echo ''",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@langfuse/client": "^5.10.1",
