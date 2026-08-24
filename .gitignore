@@ -29,6 +29,7 @@ vite.config.ts.timestamp-*
 .vscode/
 .codacy/
 .github/instructions/codacy.instructions.md
+.playwright-mcp/
 
 # Local MCP notes
 docs/MCP-OVERVIEW.md
