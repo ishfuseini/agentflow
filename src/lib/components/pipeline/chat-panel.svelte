@@ -1,8 +1,8 @@
 <script lang="ts">
   import { RotateCcw, Send } from "@lucide/svelte";
   import { SCENARIOS } from "$lib/pipeline/scenarios";
-  import type { ChatMessage, FinalPocOutputView } from "./types";
   import OutputPanel from "./output-panel.svelte";
+  import type { ChatMessage, FinalPocOutputView } from "./types";
 
   interface Props {
     messages: ChatMessage[];

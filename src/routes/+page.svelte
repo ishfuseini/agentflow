@@ -59,7 +59,11 @@
   );
   let edges = $state.raw<Edge[]>(buildFlowEdges(initialAgentNodes));
   let traceRows = $state<TraceSummaryRow[]>(createInitialTraceRows());
-  let traceTotals = $state<TraceTotals>({ latency: "--", cost: "--", eval: "--" });
+  let traceTotals = $state<TraceTotals>({
+    latency: "--",
+    cost: "--",
+    eval: "--",
+  });
   let finalOutput = $state<FinalPocOutputView | null>(null);
   let activeRunId = $state<string | null>(null);
   let editPlanOpen = $state(false);
@@ -309,11 +313,11 @@
             : "done",
         latency: `${(trace.latencyMs / 1000).toFixed(1)}s`,
         cost:
-          trace.costUsd !== undefined ? `$${trace.costUsd.toFixed(4)}` : "--",
-        eval: trace.evalScore !== undefined ? trace.evalScore.toFixed(1) : "ok",
+          trace.costUsd === undefined ? "--" : `$${trace.costUsd.toFixed(4)}`,
+        eval: trace.evalScore === undefined ? "ok" : trace.evalScore.toFixed(1),
       };
     });
-    const traces = pipeline.traces;
+    const { traces } = pipeline;
     const totalMs = traces.reduce((sum, trace) => sum + trace.latencyMs, 0);
     const totalCost = traces.reduce(
       (sum, trace) => sum + (trace.costUsd ?? 0),
@@ -328,7 +332,7 @@
     traceTotals = {
       latency: `${(totalMs / 1000).toFixed(1)}s`,
       cost: `$${totalCost.toFixed(4)}`,
-      eval: avgEval !== null ? avgEval.toFixed(1) : "--",
+      eval: avgEval === null ? "--" : avgEval.toFixed(1),
     };
   }
 
@@ -500,9 +504,9 @@
         canReset={runState !== "idle" || messages.length > 0}
         disabled={isInteractionLocked}
         {messages}
-        output={finalOutput}
         onReset={resetConversation}
         onSend={runPipeline}
+        output={finalOutput}
       />
 
       <section class="flex min-h-0 flex-col bg-darkgrey-50">

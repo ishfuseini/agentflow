@@ -7,7 +7,9 @@
 
   const nodeData = $derived(data as AgentNodeData);
   /** The HITL gate hosts the interactive review panel, so it stays a bit wider. */
-  const cardWidth = $derived(nodeData.id === "hitl" ? "w-[220px]" : "w-[180px]");
+  const cardWidth = $derived(
+    nodeData.id === "hitl" ? "w-[220px]" : "w-[180px]",
+  );
 
   function stateClass(state: AgentNodeData["state"]): string {
     if (state === "running") {

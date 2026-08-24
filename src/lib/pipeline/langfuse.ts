@@ -204,14 +204,18 @@ function scoreTrace(
  * Nominal per-1M-token pricing for the cost column in the trace summary.
  * Demo estimates — tune to actual provider invoices.
  */
-const MODEL_COST_USD_PER_1M: Record<string, { input: number; output: number }> = {
-	// Ollama Cloud (gpt-oss:20b) is subscription-based; a nominal stand-in.
-	"gpt-oss:20b": { input: 0.15, output: 0.15 },
-	// claude-opus-4-8 via OpenRouter — Opus-class frontier pricing.
-	"claude-opus-4-8": { input: 15, output: 75 },
-};
+const MODEL_COST_USD_PER_1M: Record<string, { input: number; output: number }> =
+	{
+		// Ollama Cloud (gpt-oss:20b) is subscription-based; a nominal stand-in.
+		"gpt-oss:20b": { input: 0.15, output: 0.15 },
+		// claude-opus-4-8 via OpenRouter — Opus-class frontier pricing.
+		"claude-opus-4-8": { input: 15, output: 75 },
+	};
 
-function estimateCostUsd(modelId: string, usage: AgentsUsageSnapshot): number {
+export function estimateCostUsd(
+	modelId: string,
+	usage: AgentsUsageSnapshot,
+): number {
 	const pricing = MODEL_COST_USD_PER_1M[modelId] ?? { input: 0, output: 0 };
 	return (
 		(usage.inputTokens / 1_000_000) * pricing.input +
@@ -241,10 +245,16 @@ export async function tracePipelineRun<TResult>({
 	prompt,
 	routingMode,
 	execute,
-}: PipelineTraceInput<TResult>): Promise<{ result: TResult; trace: PipelineTraceRecord }> {
+}: PipelineTraceInput<TResult>): Promise<{
+	result: TResult;
+	trace: PipelineTraceRecord;
+}> {
 	const runtime = getLangfuseRuntime();
 	if (!runtime) {
-		return { result: await execute(), trace: { traceId: null, telemetryLogged: false } };
+		return {
+			result: await execute(),
+			trace: { traceId: null, telemetryLogged: false },
+		};
 	}
 
 	const traceName = "agentflow.pipeline";
@@ -351,140 +361,134 @@ export async function traceAgentRun<TResult extends AgentRunTelemetryResult>({
 					model,
 				),
 			});
-					let agentObservationEnded = false;
-					let generationEnded = false;
-					const generation = agentObservation.startObservation(
-						`${agentName} generation`,
-						{
-							input,
-							model: model.modelId,
-							metadata: buildAgentMetadata(
-								runId,
-								agentKey,
-								agentName,
-								routingMode,
-								model,
-							),
-						},
-						{ asType: "generation" },
-					);
-					const endAgentObservation = () => {
-						if (!agentObservationEnded) {
-							agentObservation.end();
-							agentObservationEnded = true;
-						}
-					};
-					const endGeneration = () => {
-						if (!generationEnded) {
-							generation.end();
-							generationEnded = true;
-						}
-					};
+			let agentObservationEnded = false;
+			let generationEnded = false;
+			const generation = agentObservation.startObservation(
+				`${agentName} generation`,
+				{
+					input,
+					model: model.modelId,
+					metadata: buildAgentMetadata(
+						runId,
+						agentKey,
+						agentName,
+						routingMode,
+						model,
+					),
+				},
+				{ asType: "generation" },
+			);
+			const endAgentObservation = () => {
+				if (!agentObservationEnded) {
+					agentObservation.end();
+					agentObservationEnded = true;
+				}
+			};
+			const endGeneration = () => {
+				if (!generationEnded) {
+					generation.end();
+					generationEnded = true;
+				}
+			};
 
-					try {
-						const result = await execute();
-						const latencyMs = Date.now() - startedAt;
-						const usage = snapshotUsage(result.state.usage);
-						generation.update({
-							output: result.finalOutput ?? null,
-							usageDetails: buildUsageDetails(result.state.usage),
-							metadata: buildAgentMetadata(
-								runId,
-								agentKey,
-								agentName,
-								routingMode,
-								model,
-								{ latencyMs, usage },
-							),
-						});
-						endGeneration();
-						agentObservation.update({
-							output: result.finalOutput ?? null,
-							metadata: buildAgentMetadata(
-								runId,
-								agentKey,
-								agentName,
-								routingMode,
-								model,
-								{ latencyMs, usage },
-							),
-						});
-						scoreTrace(runtime.client, agentObservation, "agent_success", 1);
-						const evalScore = getEvalScore?.(result);
-						if (typeof evalScore === "number") {
-						scoreTrace(
-						runtime.client,
-						agentObservation,
-						"eval_score",
-						evalScore,
-						);
-						}
-						endAgentObservation();
+			try {
+				const result = await execute();
+				const latencyMs = Date.now() - startedAt;
+				const usage = snapshotUsage(result.state.usage);
+				generation.update({
+					output: result.finalOutput ?? null,
+					usageDetails: buildUsageDetails(result.state.usage),
+					metadata: buildAgentMetadata(
+						runId,
+						agentKey,
+						agentName,
+						routingMode,
+						model,
+						{ latencyMs, usage },
+					),
+				});
+				endGeneration();
+				agentObservation.update({
+					output: result.finalOutput ?? null,
+					metadata: buildAgentMetadata(
+						runId,
+						agentKey,
+						agentName,
+						routingMode,
+						model,
+						{ latencyMs, usage },
+					),
+				});
+				scoreTrace(runtime.client, agentObservation, "agent_success", 1);
+				const evalScore = getEvalScore?.(result);
+				if (typeof evalScore === "number") {
+					scoreTrace(runtime.client, agentObservation, "eval_score", evalScore);
+				}
+				endAgentObservation();
 
-						return {
-						result,
-						trace: {
+				return {
+					result,
+					trace: {
 						agent: agentKey,
 						traceId: agentObservation.traceId,
 						latencyMs,
 						usage,
 						tokenCount: usage.totalTokens,
-						 costUsd: estimateCostUsd(model.modelId, usage),
-						  evalScore:
-								typeof evalScore === "number" ? evalScore : undefined,
-							telemetryLogged: await flushLangfuse(runtime),
-						},
-					};
-					} catch (error) {
-						const latencyMs = Date.now() - startedAt;
-						const message = errorMessage(error);
-						generation.update({
-							output: { error: message },
-							level: "ERROR",
-							statusMessage: message,
-							metadata: buildAgentMetadata(
-								runId,
-								agentKey,
-								agentName,
-								routingMode,
-								model,
-								{ latencyMs },
-							),
-						});
-						endGeneration();
-						const errorEvent = agentObservation.startObservation(
-							"agent_run_error",
-							{
-								output: { error: message },
-								level: "ERROR",
-								statusMessage: message,
-								metadata: { runId, agent: agentKey, message },
-							},
-							{ asType: "event" },
-						);
-						errorEvent.end();
-						agentObservation.update({
-							output: { error: message },
-							level: "ERROR",
-							statusMessage: message,
-							metadata: buildAgentMetadata(
-								runId,
-								agentKey,
-								agentName,
-								routingMode,
-								model,
-								{ latencyMs },
-							),
-						});
-						scoreTrace(runtime.client, agentObservation, "agent_success", 0);
-						endAgentObservation();
-						await flushLangfuse(runtime);
-						throw error;
-					} finally {
-						endGeneration();
-						endAgentObservation();
-					}
-			},
+						costUsd: estimateCostUsd(model.modelId, usage),
+						evalScore: typeof evalScore === "number" ? evalScore : undefined,
+						telemetryLogged: await flushLangfuse(runtime),
+					},
+				};
+			} catch (error) {
+				const latencyMs = Date.now() - startedAt;
+				const message = errorMessage(error);
+				generation.update({
+					output: { error: message },
+					level: "ERROR",
+					statusMessage: message,
+					metadata: buildAgentMetadata(
+						runId,
+						agentKey,
+						agentName,
+						routingMode,
+						model,
+						{ latencyMs },
+					),
+				});
+				endGeneration();
+				const errorEvent = agentObservation.startObservation(
+					"agent_run_error",
+					{
+						output: { error: message },
+						level: "ERROR",
+						statusMessage: message,
+						metadata: { runId, agent: agentKey, message },
+					},
+					{ asType: "event" },
+				);
+				errorEvent.end();
+				agentObservation.update({
+					output: { error: message },
+					level: "ERROR",
+					statusMessage: message,
+					metadata: buildAgentMetadata(
+						runId,
+						agentKey,
+						agentName,
+						routingMode,
+						model,
+						{ latencyMs },
+					),
+				});
+				scoreTrace(runtime.client, agentObservation, "agent_success", 0);
+				endAgentObservation();
+				await flushLangfuse(runtime);
+				throw error;
+			} finally {
+				endGeneration();
+				endAgentObservation();
+			}
+		},
 		{
 			asType: "agent",
 			endOnExit: false,

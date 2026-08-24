@@ -126,12 +126,7 @@ const langfuseMocks = {
 				state().clients.push(params);
 				this.score = {
 					create(data) {
-						state().scores.push(data);
-				this.score = {
-					create(data) {
-						state().scores.push({
-							...data,
-						});
+						state().scores.push({ ...data });
 					},
 				};
 			}
@@ -393,7 +388,7 @@ test("logHitlDecision creates a span, event metadata, and human latency score", 
 	}
 });
 
-test("traceAgentRun propagates session and routing metadata into the OTEL context", async () => {
+test("traceAgentRun records agent and routing metadata on its observations", async () => {
 	const state = resetLangfuseState();
 	const { module, server } = await loadLangfuseModule();
 	try {
@@ -414,20 +409,13 @@ test("traceAgentRun propagates session and routing metadata into the OTEL contex
 			}),
 		});
 
-		assert.deepEqual(state.propagations[0], {
-			sessionId: "run-propagation",
-			traceName: "agentflow.agent.riskChecker",
-			tags: ["agentflow", "agent-run", "riskChecker", "intelligence"],
-			metadata: {
-				app: "agentflow",
-				runId: "run-propagation",
-				agent: "riskChecker",
-				agentName: "Risk Checker",
-				routingMode: "intelligence",
-				provider: "openrouter",
-				modelId: "anthropic/claude-opus-4.8",
-			},
-		});
+		const agentObs = findObservation(state, "agentflow.agent.riskChecker");
+		assert.equal(agentObs.metadata.app, "agentflow");
+		assert.equal(agentObs.metadata.agent, "riskChecker");
+		assert.equal(agentObs.metadata.agentName, "Risk Checker");
+		assert.equal(agentObs.metadata.routingMode, "intelligence");
+		assert.equal(agentObs.metadata.provider, "openrouter");
+		assert.equal(agentObs.metadata.modelId, "anthropic/claude-opus-4.8");
 
 		const generation = findObservation(state, "Risk Checker generation");
 		assert.equal(generation.metadata.runId, "run-propagation");
@@ -540,6 +528,115 @@ test("POST /api/run returns trace records for all three agents", async () => {
 			["trace-q", "trace-a", "trace-r"],
 		);
 		assert.equal(globalThis.__apiRunTestState.calls[0].runId, body.runId);
+	} finally {
+		await server.close();
+	}
+});
+
+test("tracePipelineRun creates a parent 'agentflow.pipeline' trace scoped by sessionId=runId", async () => {
+	const state = resetLangfuseState();
+	const { module, server } = await loadLangfuseModule();
+	try {
+		const executed = [];
+		const { result, trace } = await module.tracePipelineRun({
+			runId: "run-pipeline",
+			prompt: "Build a POC plan",
+			routingMode: "intelligence",
+			execute: () => {
+				executed.push("ran");
+				return { ok: true };
+			},
+		});
+
+		assert.deepEqual(result, { ok: true });
+		assert.equal(trace.traceId, "trace-1");
+		assert.equal(trace.telemetryLogged, true);
+		assert.deepEqual(executed, ["ran"]);
+
+		const pipeline = findObservation(state, "agentflow.pipeline");
+		assert.equal(pipeline.type, "span");
+		assert.equal(pipeline.ended, true);
+		assert.equal(pipeline.endCount, 1);
+		assert.deepEqual(pipeline.input, "Build a POC plan");
+		assert.deepEqual(pipeline.output, {
+			status: "completed",
+			runId: "run-pipeline",
+			agents: ["qualifier", "architect", "riskChecker"],
+		});
+		assert.equal(pipeline.metadata.runId, "run-pipeline");
+		assert.equal(pipeline.metadata.routingMode, "intelligence");
+
+		assert.deepEqual(state.propagations[0], {
+			sessionId: "run-pipeline",
+			traceName: "agentflow.pipeline",
+			tags: ["agentflow", "pipeline-run", "intelligence"],
+			metadata: {
+				app: "agentflow",
+				runId: "run-pipeline",
+				routingMode: "intelligence",
+			},
+		});
+
+		assert.equal(state.forceFlushes, 1);
+		assert.equal(state.clientFlushes, 1);
+	} finally {
+		await server.close();
+	}
+});
+
+test("estimateCostUsd applies per-model pricing and falls back to $0 for unknown models", async () => {
+	resetLangfuseState();
+	const { module, server } = await loadLangfuseModule();
+	try {
+		assert.equal(
+			module.estimateCostUsd("gpt-oss:20b", {
+				inputTokens: 1_000_000,
+				outputTokens: 0,
+			}),
+			0.15,
+		);
+		assert.equal(
+			module.estimateCostUsd("gpt-oss:20b", {
+				inputTokens: 0,
+				outputTokens: 1_000_000,
+			}),
+			0.15,
+		);
+		assert.equal(
+			module.estimateCostUsd("claude-opus-4-8", {
+				inputTokens: 1_000_000,
+				outputTokens: 0,
+			}),
+			15,
+		);
+		assert.equal(
+			module.estimateCostUsd("claude-opus-4-8", {
+				inputTokens: 0,
+				outputTokens: 1_000_000,
+			}),
+			75,
+		);
+		assert.equal(
+			module.estimateCostUsd("unknown-model", {
+				inputTokens: 1_000_000,
+				outputTokens: 1_000_000,
+			}),
+			0,
+		);
+		assert.equal(
+			module.estimateCostUsd("gpt-oss:20b", {
+				inputTokens: 0,
+				outputTokens: 0,
+			}),
+			0,
+		);
+
+		const mixed = module.estimateCostUsd("claude-opus-4-8", {
+			inputTokens: 12,
+			outputTokens: 34,
+		});
+		const expectedMixed = (12 * 15 + 34 * 75) / 1_000_000;
+		assert.ok(Math.abs(mixed - expectedMixed) < 1e-12);
 	} finally {
 		await server.close();
 	}

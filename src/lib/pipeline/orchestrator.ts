@@ -189,7 +189,7 @@ export async function runPipeline(
 								),
 								riskCheckerInput,
 							),
-						getEvalScore: (result) => result.finalOutput?.overall_score,
+						getEvalScore: (riskResult) => riskResult.finalOutput?.overall_score,
 					});
 				const riskCheckerOutput: RiskCheckerOutput = requireFinalOutput(
 					riskCheckerResult.finalOutput,
