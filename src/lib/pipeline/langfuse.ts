@@ -209,7 +209,7 @@ function scoreTrace(
 	name: string,
 	value: number,
 ): void {
-	client.score.trace(observation, { name, value });
+	client.score.create({ traceId: observation.traceId, name: name, value: value });
 }
 
 export async function traceAgentRun<TResult extends AgentRunTelemetryResult>({
