@@ -307,7 +307,7 @@ export async function traceAgentRun<TResult extends AgentRunTelemetryResult>({
 						const usage = snapshotUsage(result.state.usage);
 						generation.update({
 							output: result.finalOutput ?? null,
-							usageDetails: buildUsageDetails(result.state.usage),
+							usage: buildUsageDetails(result.state.usage),
 							metadata: buildAgentMetadata(
 								runId,
 								agentKey,
