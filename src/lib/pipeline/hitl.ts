@@ -69,24 +69,49 @@ function extractJsonFromBlocks(
 	return text ? parseJsonString(text) : undefined;
 }
 
-function normalizeToolResult(value: unknown): unknown {
+function normalizeStringToolResult(value: unknown): unknown | undefined {
 	if (typeof value === "string") {
 		return parseJsonString(value);
 	}
+	return undefined;
+}
 
+function normalizeBlockArrayToolResult(value: unknown): unknown | undefined {
 	if (Array.isArray(value)) {
 		return extractJsonFromBlocks(value) ?? value;
 	}
+	return undefined;
+}
 
+function normalizeTextBlockToolResult(value: unknown): unknown | undefined {
 	const text = getTextBlockValue(value);
 	if (text) {
 		return parseJsonString(text);
 	}
+	return undefined;
+}
 
+function normalizeContentRecordToolResult(value: unknown): unknown | undefined {
 	if (isRecord(value) && Array.isArray(value.content)) {
 		return extractJsonFromBlocks(value.content) ?? value;
 	}
+	return undefined;
+}
 
+const TOOL_RESULT_NORMALIZERS = [
+	normalizeStringToolResult,
+	normalizeBlockArrayToolResult,
+	normalizeTextBlockToolResult,
+	normalizeContentRecordToolResult,
+] as const;
+
+function normalizeToolResult(value: unknown): unknown {
+	for (const normalizeResult of TOOL_RESULT_NORMALIZERS) {
+		const result = normalizeResult(value);
+		if (result !== undefined) {
+			return result;
+		}
+	}
 	return value;
 }
 
