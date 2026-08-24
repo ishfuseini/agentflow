@@ -13,6 +13,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["scripts/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
     }
   ],
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json"
