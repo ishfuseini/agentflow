@@ -1,6 +1,6 @@
 ## Purpose
 
-Interactive web UI built with SvelteKit that renders the agent pipeline as a compact live node diagram, provides a chat-based interface for triggering pipeline runs, and displays the final POC plan in a Results tab. The binding visual spec is `docs/design/design.md` + `wireframe.md` (typography: Cabin/Inconsolata; OKLCH color tokens in `src/styles/theme.css`; 2-column layout).
+Interactive web UI built with SvelteKit that renders the agent pipeline as an orchestrator-hub node diagram with per-agent step progress and an MCP tools node, provides a chat-based interface for triggering pipeline runs, and surfaces agent responses in the conversation thread with the final POC plan in a Results tab. The binding visual spec is `docs/design/design.md` + `wireframe.md` (typography: Cabin/Inconsolata; OKLCH color tokens in `src/styles/theme.css`; 2-column layout).
 
 ## ADDED Requirements
 
@@ -14,9 +14,24 @@ The UI SHALL render a two-column grid at full viewport: Chat (fixed 450px) | Pip
 - **THEN** the Chat and Pipeline columns SHALL render at 450px / remaining width
 - **AND** the Pipeline column SHALL show the node graph above the full-width trace summary
 
-### Requirement: Node Diagram with Live Agent States
+### Requirement: Orchestrator-Hub Node Diagram with Live Agent States
 
-The UI SHALL render a node graph using Svelte Flow showing 4 compact nodes in sequence: Qualifier → Architect → Risk Checker → HITL Gate. Each node SHALL visually transition through 5 states: `idle` (darkcyan border, grey dot), `running` (rebeccapurple border + glow ring, pulsing purple StatusDot), `done` (darkcyan border, CheckCircle2), `warning` (sienna border, AlertTriangle), and `paused` (sienna border + amber glow, AlertTriangle). Nodes SHALL connect via ConnectorLine components (animated scaleY/edge draw, active connector highlighted when the target is reached). The default viewport SHALL fit the nodes then zoom out one click so the graph renders comfortably smaller than the container.
+The UI SHALL render a node graph using Svelte Flow with 6 nodes: an **Orchestrator** node, the three agent nodes (Qualifier, Architect, Risk Checker), the **HITL Gate** node, and an **MCP Tools** node. The Orchestrator SHALL dispatch to the other four in order via numbered, labelled edges (`1 qualify`, `2 architect`, `3 risk check`, `4 review`), each with a return edge back to the Orchestrator, so the caller and the call order are legible without reading the code. The MCP Tools node SHALL sit to the side, reached by dashed edges from the Architect and the Risk Checker only (the Qualifier makes no tool calls). Each agent node SHALL visually transition through 5 states: `idle` (darkcyan border, grey dot), `running` (rebeccapurple border + glow ring, pulsing purple StatusDot), `done` (darkcyan border, CheckCircle2), `warning` (sienna border, AlertTriangle), and `paused` (sienna border + amber glow, AlertTriangle). Edges SHALL animate (scaleY / edge draw) with the active edge highlighted. The default viewport SHALL fit the nodes then zoom out one click so the graph renders comfortably smaller than the container.
+
+#### Scenario: Orchestrator dispatch is visible
+
+- **WHEN** the Orchestrator dispatches to an agent
+- **THEN** that dispatch edge SHALL highlight while the step is in flight, with its step number and label visible
+- **AND** the return edge SHALL activate when the agent hands its output back
+- **AND** the user SHALL be able to tell which component is calling which at every step
+
+#### Scenario: MCP tool edges activate during tool calls
+
+- **WHEN** the Architect Agent calls an MCP tool
+- **THEN** the dashed edge from Architect to the MCP Tools node SHALL activate for the duration of the call
+- **WHEN** the Risk Checker calls `risk_policy_lookup`
+- **THEN** the dashed edge from Risk Checker to the MCP Tools node SHALL activate
+- **AND** no MCP edge SHALL exist from the Qualifier node
 
 #### Scenario: Agent node transitions to running
 
@@ -29,18 +44,25 @@ The UI SHALL render a node graph using Svelte Flow showing 4 compact nodes in se
 #### Scenario: Sequential node activation
 
 - **WHEN** a pipeline run is in progress
-- **THEN** nodes SHALL light up sequentially: Qualifier → Architect → Risk Checker → HITL Gate
-- **AND** only one node SHALL be `running` at a time (the currently executing agent)
+- **THEN** the Orchestrator SHALL activate the agents in order: Qualifier → Architect → Risk Checker → HITL Gate
+- **AND** only one agent node SHALL be `running` at a time (the currently executing agent)
 
-### Requirement: Compact Node Cards
+### Requirement: Agent Node Cards with Step Progress
 
-The Qualifier, Architect, and Risk Checker nodes SHALL render as compact cards (~160px wide) showing only the node label (`text-sm`) and status indicator; the subtitle SHALL be available as a hover tooltip. Detailed card content — step progress indicators, per-step detail rows, and tool-call collapsible rows — SHALL NOT render inside the graph nodes. The HITL Gate node SHALL render slightly wider (~200px) to host the interactive review panel when paused. All nodes SHALL remain readable.
+The Qualifier, Architect, and Risk Checker nodes SHALL show the node label (`text-sm`), status indicator, and a step-progress row: a step count (e.g. `2/4`) plus a row of step markers that fill as each execution task completes (completed: `darkcyan-600` CheckCircle2; active: pulsing `rebeccapurple-500`; pending: `darkgrey-400`). Step counts are agent-specific — Qualifier 1 (extract requirements), Architect 4 (`arch_pattern_lookup`, `tool_selection_lookup`, `brand_context_lookup`, synthesize plan), Risk Checker 3 (`risk_policy_lookup`, evaluate rubric, produce assessment). Each completed step SHALL append a detail row inside the card, and tool-call steps SHALL render as collapsible rows (Zap icon + `tool_name()` + ChevronDown; expanding reveals the result text with a `→` prefix). The card SHALL expand vertically as rows appear. The subtitle SHALL remain a hover tooltip. The HITL Gate node SHALL render slightly wider (~200px) to host the interactive review panel when paused.
 
-#### Scenario: Agent nodes render compact
+#### Scenario: Architect node shows step progress
 
-- **WHEN** the node graph renders
-- **THEN** the Qualifier, Architect, and Risk Checker nodes SHALL show label and status indicator only, with the subtitle available as a hover tooltip
-- **AND** no step-progress rows, step-detail rows, or tool-call rows SHALL render inside the agent nodes
+- **WHEN** the Architect Agent runs
+- **THEN** its NodeCard SHALL show the step count advancing 1/4 → 2/4 → 3/4 → 4/4
+- **AND** the step markers SHALL fill as each task completes
+- **AND** the card SHALL expand as each step's detail row appears
+
+#### Scenario: Tool calls expand inside the Architect node
+
+- **WHEN** the Architect Agent's MCP tool calls complete
+- **THEN** `arch_pattern_lookup`, `tool_selection_lookup`, and `brand_context_lookup` SHALL appear as collapsible rows inside the Architect NodeCard
+- **AND** expanding a row SHALL reveal the tool result text with a `→` prefix
 
 #### Scenario: HITL gate renders wider for review
 
@@ -62,7 +84,13 @@ When the pipeline reaches the HITL gate, the HITL NodeCard SHALL enter `paused` 
 
 ### Requirement: Chat Panel with Tabs
 
-The left column SHALL be a chat panel. Quick scenario buttons SHALL be fixed at the top (4 scenarios: Agency, Healthcare, Retail Lakehouse, FSI Governance), disabled during a pipeline run. Below an `hr` divider, a tab bar SHALL provide two tabs: "Chat" and "Results". The Chat tab SHALL show a scrollable conversation thread (`flex flex-col justify-end`) where user bubbles (right-aligned, `bg-rebeccapurple-500 text-white rounded-br-sm`) and system bubbles (left-aligned, `bg-darkgrey-200 text-foreground rounded-bl-sm`) anchor to the bottom and grow upward, with an input row + send button (`w-9 h-9`) pinned to the bottom with `border-t-2`. The Results tab SHALL render the final POC plan output. A "← New conversation" reset link SHALL appear after a run.
+The left column SHALL be a chat panel. Quick scenario buttons SHALL be fixed at the top (4 scenarios: Agency, Healthcare, Retail Lakehouse, FSI Governance), disabled during a pipeline run. Below an `hr` divider, a tab bar SHALL provide two tabs: "Chat" and "Results". The Chat tab SHALL show a scrollable conversation thread (`flex flex-col justify-end`) where user bubbles (right-aligned, `bg-rebeccapurple-500 text-white rounded-br-sm`) and system bubbles (left-aligned, `bg-darkgrey-200 text-foreground rounded-bl-sm`) anchor to the bottom and grow upward, with an input row + send button (`w-9 h-9`) pinned to the bottom with `border-t-2`. On load, the thread SHALL open with an entry system bubble that says what the pipeline does, names the three agents, the MCP tool step, and the HITL gate, and invites the user to pick a scenario or describe their own ask; the input SHALL carry a descriptive placeholder rather than a bare field. Agent results and the final POC plan SHALL be surfaced as system bubbles in the thread as the run progresses, not status lines alone. The Results tab SHALL render the final POC plan output, and the panel SHALL switch to the Results tab automatically when the pipeline completes; the user SHALL be able to switch back to Chat. A "← New conversation" reset link SHALL appear after a run.
+
+#### Scenario: Entry prompt on load
+
+- **WHEN** the page loads with no conversation history
+- **THEN** the Chat tab SHALL show an entry system bubble naming the three agents, the MCP tool step, and the HITL gate
+- **AND** the chat input SHALL show a descriptive placeholder describing what makes a good pre-sales ask
 
 #### Scenario: User sends a scenario as a chat message
 
@@ -77,11 +105,17 @@ The left column SHALL be a chat panel. Quick scenario buttons SHALL be fixed at 
 - **THEN** the typed text SHALL be sent as a user chat message
 - **AND** the pipeline SHALL begin execution using the typed text as input
 
-#### Scenario: System responds in the conversation thread
+#### Scenario: Agent responses appear in the conversation thread
 
-- **WHEN** the pipeline produces output (agent results, HITL gate, final plan)
-- **THEN** system bubbles SHALL appear in the conversation thread left-aligned
+- **WHEN** an agent produces its result, the HITL gate is reached, or the final plan is ready
+- **THEN** the response content SHALL appear as a left-aligned system bubble in the conversation thread
 - **AND** the conversation thread SHALL scroll so the latest message is visible
+
+#### Scenario: Panel switches to Results on completion
+
+- **WHEN** the pipeline completes
+- **THEN** the chat panel SHALL switch from the Chat tab to the Results tab automatically
+- **AND** the user SHALL be able to switch back to the Chat tab to read the conversation
 
 #### Scenario: Results render in the Results tab
 
@@ -92,7 +126,7 @@ The left column SHALL be a chat panel. Quick scenario buttons SHALL be fixed at 
 #### Scenario: New conversation reset
 
 - **WHEN** the user clicks "← New conversation" after a run
-- **THEN** the conversation thread SHALL clear
+- **THEN** the conversation thread SHALL clear back to the entry system bubble
 - **AND** the node diagram, trace summary, and Results tab SHALL reset to idle state
 
 ### Requirement: Structured Output (Results Tab)
@@ -107,15 +141,21 @@ The Results tab SHALL render the final structured POC plan output with a "POC Pl
 
 ### Requirement: Full-Width Trace Summary
 
-The bottom half of the Pipeline column SHALL render a trace summary card spanning the full column width. It SHALL display one row per agent: status icon · label · latency (seconds) · cost (USD) · eval score (with ✓/⚠ indicator), updating in real time as each node completes. A footer SHALL display pipeline aggregate totals: total compute time, total cost, and pipeline eval score. The routing mode SHALL display in the panel header.
+The bottom half of the Pipeline column SHALL render a trace summary card spanning the full column width. It SHALL display one row per Langfuse observation in the run — not one row per agent, and with no per-agent grouping — showing observation name, type (`SPAN` / `AGENT` / `GENERATION` / `EVENT`), latency (seconds), token count, cost (USD), and level, in chronological order, updating in real time as observations land. A footer SHALL display pipeline aggregate totals: total compute time, total cost, and pipeline eval score. The routing mode SHALL display in the panel header.
 
-#### Scenario: Trace rows appear as agents complete
+#### Scenario: Observation rows render flat
+
+- **WHEN** a pipeline run produces observations
+- **THEN** each observation SHALL render as its own row with name, type, latency, tokens, cost, and level
+- **AND** rows SHALL NOT be grouped, nested, or aggregated under an agent heading
+
+#### Scenario: Trace rows appear as observations land
 
 - **WHEN** the Qualifier Agent completes
-- **THEN** its trace row SHALL appear in the summary immediately
-- **AND** trace rows SHALL accumulate progressively as the pipeline runs
+- **THEN** its observation rows SHALL appear in the summary immediately
+- **AND** rows SHALL accumulate progressively as the pipeline runs
 
 #### Scenario: Aggregate footer after full run
 
 - **WHEN** the pipeline completes end-to-end
-- **THEN** the trace summary footer SHALL display total compute time (sum of agent latencies), total cost (sum of agent costs), and pipeline eval score (average of agent eval scores)
+- **THEN** the trace summary footer SHALL display total compute time, total cost, and pipeline eval score

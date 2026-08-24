@@ -116,7 +116,7 @@ export async function runPipeline(
 	prompt: string,
 	routingMode: RoutingMode,
 	domain?: string,
-	runId = crypto.randomUUID(),
+	runId: string = crypto.randomUUID(),
 ): Promise<PipelineResult> {
 	const models = resolveAgentModels(routingMode);
 

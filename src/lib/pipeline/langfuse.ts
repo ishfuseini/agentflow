@@ -395,6 +395,7 @@ export async function traceAgentRun<TResult extends AgentRunTelemetryResult>({
 				const result = await execute();
 				const latencyMs = Date.now() - startedAt;
 				const usage = snapshotUsage(result.state.usage);
+				const costUsd = estimateCostUsd(model.modelId, usage);
 				generation.update({
 					output: result.finalOutput ?? null,
 					usageDetails: buildUsageDetails(result.state.usage),
@@ -404,7 +405,7 @@ export async function traceAgentRun<TResult extends AgentRunTelemetryResult>({
 						agentName,
 						routingMode,
 						model,
-						{ latencyMs, usage },
+						{ latencyMs, usage, costUsd },
 					),
 				});
 				endGeneration();
@@ -416,7 +417,7 @@ export async function traceAgentRun<TResult extends AgentRunTelemetryResult>({
 						agentName,
 						routingMode,
 						model,
-						{ latencyMs, usage },
+						{ latencyMs, usage, costUsd },
 					),
 				});
 				scoreTrace(runtime.client, agentObservation, "agent_success", 1);
@@ -584,4 +585,314 @@ export async function logHitlDecision({
 			asType: "span",
 		},
 	);
+}
+
+// ---------------------------------------------------------------------------
+// Trace reading (Langfuse API) — powers the trace summary table.
+// ---------------------------------------------------------------------------
+
+export interface TraceAgentSummary {
+	agent: TracedAgentKey;
+	label: string;
+	latencyMs: number | null;
+	tokenCount: number | null;
+	costUsd: number | null;
+	evalScore: number | null;
+}
+
+export interface TraceHitlSummary {
+	decision: HitlDecisionType;
+	humanLatencyMs: number;
+}
+
+export interface TraceAggregateSummary {
+	latencyMs: number | null;
+	totalTokens: number | null;
+	costUsd: number | null;
+	evalScore: number | null;
+}
+
+export interface RunTraceSummary {
+	runId: string;
+	available: boolean;
+	found: boolean;
+	agents: TraceAgentSummary[];
+	hitl: TraceHitlSummary | null;
+	aggregate: TraceAggregateSummary;
+}
+
+/** Subset of a Langfuse public-API trace list item we read. */
+interface LangfuseTraceListItem {
+	id: string;
+	name: string | null;
+}
+
+/** Subset of a Langfuse observation (v1 view) we read. */
+interface LangfuseObservation {
+	id: string;
+	name: string | null;
+	type: string;
+	parentObservationId: string | null;
+	latency?: number | null;
+	usageDetails?: Record<string, number> | null;
+	totalPrice?: number | null;
+	calculatedTotalCost?: number | null;
+	metadata?: unknown;
+}
+
+/** Subset of a Langfuse trace detail (GET /api/public/traces/{id}). */
+interface LangfuseTraceDetail {
+	id: string;
+	name: string | null;
+	observations: LangfuseObservation[];
+	scores: Array<{
+		name: string;
+		value: number;
+		observationId?: string | null;
+	}>;
+}
+
+interface LangfuseTraceListResponse {
+	data: LangfuseTraceListItem[];
+}
+
+const PIPELINE_TRACE_NAME = "agentflow.pipeline";
+const HITL_TRACE_NAME = "agentflow.hitl_decision";
+const GENERATION_OBSERVATION_TYPE = "GENERATION";
+const EVAL_SCORE_NAME = "eval_score";
+const HUMAN_LATENCY_SCORE_NAME = "human_latency_ms";
+
+const AGENT_OBSERVATION_NAMES: Record<TracedAgentKey, string> = {
+	qualifier: "agentflow.agent.qualifier",
+	architect: "agentflow.agent.architect",
+	riskChecker: "agentflow.agent.riskChecker",
+};
+
+const AGENT_LABELS: Record<TracedAgentKey, string> = {
+	qualifier: "Qualifier",
+	architect: "Architect",
+	riskChecker: "Risk Checker",
+};
+
+const TRACED_AGENTS: TracedAgentKey[] = [
+	"qualifier",
+	"architect",
+	"riskChecker",
+];
+
+const TRACE_FETCH_RETRIES = 3;
+const TRACE_FETCH_RETRY_DELAY_MS = 300;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function waitForTraceExport(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function emptyRunTraceSummary(
+	runId: string,
+	available: boolean,
+): RunTraceSummary {
+	return {
+		runId,
+		available,
+		found: false,
+		agents: TRACED_AGENTS.map((agent) => ({
+			agent,
+			label: AGENT_LABELS[agent],
+			latencyMs: null,
+			tokenCount: null,
+			costUsd: null,
+			evalScore: null,
+		})),
+		hitl: null,
+		aggregate: {
+			latencyMs: null,
+			totalTokens: null,
+			costUsd: null,
+			evalScore: null,
+		},
+	};
+}
+
+function readCostUsd(observation: LangfuseObservation | undefined): number | null {
+	if (!observation) {
+		return null;
+	}
+	const metadata = isRecord(observation.metadata) ? observation.metadata : {};
+	if (typeof metadata.costUsd === "number") {
+		return metadata.costUsd;
+	}
+	if (typeof observation.totalPrice === "number") {
+		return observation.totalPrice;
+	}
+	if (typeof observation.calculatedTotalCost === "number") {
+		return observation.calculatedTotalCost;
+	}
+	return null;
+}
+
+function readEvalScore(
+	trace: LangfuseTraceDetail,
+	observationId: string,
+): number | null {
+	const score = trace.scores.find(
+		(item) =>
+			item.name === EVAL_SCORE_NAME &&
+			(item.observationId === observationId || item.observationId === null),
+	);
+	return score && typeof score.value === "number" ? score.value : null;
+}
+
+function extractAgentSummary(
+	trace: LangfuseTraceDetail,
+	agent: TracedAgentKey,
+): TraceAgentSummary {
+	const label = AGENT_LABELS[agent];
+	const root = trace.observations.find(
+		(observation) => observation.name === AGENT_OBSERVATION_NAMES[agent],
+	);
+	if (!root) {
+		return {
+			agent,
+			label,
+			latencyMs: null,
+			tokenCount: null,
+			costUsd: null,
+			evalScore: null,
+		};
+	}
+	const generation = trace.observations.find(
+		(observation) =>
+			observation.parentObservationId === root.id &&
+			observation.type === GENERATION_OBSERVATION_TYPE,
+	);
+	const usageSource = generation ?? root;
+	const tokenCount =
+		typeof usageSource.usageDetails?.total === "number"
+			? usageSource.usageDetails.total
+			: null;
+	const latencyMs =
+		typeof root.latency === "number" ? root.latency * 1000 : null;
+	const costUsd = readCostUsd(root) ?? readCostUsd(generation);
+	const evalScore = readEvalScore(trace, root.id);
+	return { agent, label, latencyMs, tokenCount, costUsd, evalScore };
+}
+
+function extractHitlSummary(trace: LangfuseTraceDetail): TraceHitlSummary | null {
+	const root = trace.observations.find(
+		(observation) => observation.name === HITL_TRACE_NAME,
+	);
+	const metadata = isRecord(root?.metadata) ? root.metadata : {};
+	const decision: HitlDecisionType | undefined =
+		metadata.decision === "approved" || metadata.decision === "edited"
+			? metadata.decision
+			: undefined;
+	let humanLatencyMs =
+		typeof metadata.humanLatencyMs === "number" ? metadata.humanLatencyMs : null;
+	if (humanLatencyMs === null) {
+		const score = trace.scores.find(
+			(item) => item.name === HUMAN_LATENCY_SCORE_NAME,
+		);
+		humanLatencyMs =
+			score && typeof score.value === "number" ? score.value : null;
+	}
+	if (!decision || humanLatencyMs === null) {
+		return null;
+	}
+	return { decision, humanLatencyMs };
+}
+
+function buildAggregate(agents: TraceAgentSummary[]): TraceAggregateSummary {
+	const latencies = agents.flatMap((agent) =>
+		agent.latencyMs === null ? [] : [agent.latencyMs],
+	);
+	const tokens = agents.flatMap((agent) =>
+		agent.tokenCount === null ? [] : [agent.tokenCount],
+	);
+	const costs = agents.flatMap((agent) =>
+		agent.costUsd === null ? [] : [agent.costUsd],
+	);
+	const evals = agents.flatMap((agent) =>
+		agent.evalScore === null ? [] : [agent.evalScore],
+	);
+	const sum = (values: number[]): number | null =>
+		values.length === 0
+			? null
+			: values.reduce((total, value) => total + value, 0);
+	return {
+		latencyMs: sum(latencies),
+		totalTokens: sum(tokens),
+		costUsd: sum(costs),
+		evalScore:
+			evals.length === 0
+				? null
+				: evals.reduce((total, value) => total + value, 0) / evals.length,
+	};
+}
+
+/**
+ * Fetches the Langfuse trace summary for a pipeline run via the Langfuse API.
+ *
+ * Traces are scoped by `sessionId = runId` (see `tracePipelineRun`). The summary
+ * contains one row per agent plus the HITL decision row (when present) and
+ * aggregate totals — all read back from Langfuse, not from in-memory state.
+ */
+export async function fetchRunTraces(runId: string): Promise<RunTraceSummary> {
+	const runtime = getLangfuseRuntime();
+	if (!runtime) {
+		return emptyRunTraceSummary(runId, false);
+	}
+
+	const api = runtime.client.api;
+	let pipelineTrace: LangfuseTraceDetail | null = null;
+	let hitlTrace: LangfuseTraceDetail | null = null;
+
+	// The span processor exports with `exportMode: "immediate"`, but ingestion
+	// can still lag a beat — retry briefly so a just-finished run is found.
+	for (let attempt = 0; attempt < TRACE_FETCH_RETRIES; attempt += 1) {
+		if (attempt > 0) {
+			await waitForTraceExport(TRACE_FETCH_RETRY_DELAY_MS);
+		}
+		const traces = (await api.trace.list({
+			sessionId: runId,
+			limit: 50,
+		})) as unknown as LangfuseTraceListResponse;
+		const traceIdsByName = new Map(
+			traces.data.map((trace) => [trace.name, trace.id]),
+		);
+		const pipelineId = traceIdsByName.get(PIPELINE_TRACE_NAME);
+		if (pipelineId) {
+			pipelineTrace = (await api.trace.get(
+				pipelineId,
+			)) as unknown as LangfuseTraceDetail;
+			const hitlId = traceIdsByName.get(HITL_TRACE_NAME);
+			if (hitlId) {
+				hitlTrace = (await api.trace.get(
+					hitlId,
+				)) as unknown as LangfuseTraceDetail;
+			}
+			break;
+		}
+	}
+
+	if (!pipelineTrace) {
+		return emptyRunTraceSummary(runId, true);
+	}
+
+	const detail = pipelineTrace;
+	const agents = TRACED_AGENTS.map((agent) =>
+		extractAgentSummary(detail, agent),
+	);
+	const hitl = hitlTrace ? extractHitlSummary(hitlTrace) : null;
+	return {
+		runId,
+		available: true,
+		found: true,
+		agents,
+		hitl,
+		aggregate: buildAggregate(agents),
+	};
 }

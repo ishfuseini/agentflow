@@ -11,6 +11,11 @@ const RunRequestSchema = z.object({
 	routingMode: z.enum(ROUTING_MODES).default("cost"),
 	/** Optional customer domain, passed through to the Architect's brand_context_lookup call */
 	domain: z.string().min(1).optional(),
+	/**
+	 * Optional run id chosen by the client so it can poll trace data while the
+	 * pipeline is still running. The server generates one when omitted.
+	 */
+	runId: z.string().min(1).optional(),
 });
 
 type RunRequest = z.infer<typeof RunRequestSchema>;
@@ -33,14 +38,14 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json(
 			{
 				error:
-					'Expected body { "prompt": string (non-empty), "routingMode": "cost" | "intelligence", "domain"?: string }',
+					'Expected body { "prompt": string (non-empty), "routingMode": "cost" | "intelligence", "domain"?: string, "runId"?: string }',
 			},
 			{ status: 400 },
 		);
 	}
 
 	try {
-		const runId = crypto.randomUUID();
+		const runId = runRequest.runId ?? crypto.randomUUID();
 		const result = await runPipeline(
 			runRequest.prompt,
 			runRequest.routingMode,

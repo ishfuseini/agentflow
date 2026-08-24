@@ -111,6 +111,10 @@ const resetLangfuseState = () => {
 		scores: [],
 		sdks: [],
 		spanProcessors: [],
+		traceList: async () => ({ data: [], meta: {} }),
+		traceGet: async () => {
+			throw new Error("trace not found");
+		},
 	};
 	return globalThis.__langfuseTestState;
 };
@@ -127,6 +131,16 @@ const langfuseMocks = {
 				this.score = {
 					create(data) {
 						state().scores.push({ ...data });
+					},
+				};
+				this.api = {
+					trace: {
+						async list(params) {
+							return state().traceList(params);
+						},
+						async get(traceId) {
+							return state().traceGet(traceId);
+						},
 					},
 				};
 			}
@@ -533,6 +547,98 @@ test("POST /api/run returns trace records for all three agents", async () => {
 	}
 });
 
+test("POST /api/run honors a client-provided runId for real-time trace polling", async () => {
+	globalThis.__apiRunTestState = { calls: [] };
+	const server = await createMockedServer({
+		"$lib/pipeline/hitl": `
+			export function shouldPauseForHitl() {
+				return false;
+			}
+			export function buildFinalPocOutput() {
+				return { ok: true };
+			}
+		`,
+		"$lib/pipeline/hitl-state": `
+			export async function createPendingHitlRun(pipeline, runId) {
+				return { runId, gate: {}, pipeline };
+			}
+		`,
+		"$lib/pipeline/orchestrator": `
+			export async function runPipeline(prompt, routingMode, domain, runId) {
+				globalThis.__apiRunTestState.calls.push({ prompt, routingMode, domain, runId });
+				return {
+					runId,
+					prompt,
+					routingMode,
+					qualifier: { ok: true },
+					architect: { poc_plan: {} },
+					riskChecker: { overall_score: 4 },
+					toolCalls: [],
+					traces: [],
+				};
+			}
+		`,
+		"$lib/pipeline/routing": `
+			export const ROUTING_MODES = ["cost", "intelligence"];
+		`,
+		"src/lib/pipeline/hitl": `
+			export function shouldPauseForHitl() {
+				return false;
+			}
+			export function buildFinalPocOutput() {
+				return { ok: true };
+			}
+		`,
+		"src/lib/pipeline/hitl-state": `
+			export async function createPendingHitlRun(pipeline, runId) {
+				return { runId, gate: {}, pipeline };
+			}
+		`,
+		"src/lib/pipeline/orchestrator": `
+			export async function runPipeline(prompt, routingMode, domain, runId) {
+				globalThis.__apiRunTestState.calls.push({ prompt, routingMode, domain, runId });
+				return {
+					runId,
+					prompt,
+					routingMode,
+					qualifier: { ok: true },
+					architect: { poc_plan: {} },
+					riskChecker: { overall_score: 4 },
+					toolCalls: [],
+					traces: [],
+				};
+			}
+		`,
+		"src/lib/pipeline/routing": `
+			export const ROUTING_MODES = ["cost", "intelligence"];
+		`,
+	});
+	try {
+		const { POST } = await server.ssrLoadModule(
+			"/src/routes/api/run/+server.ts",
+		);
+		const clientRunId = "client-chosen-run-id";
+		const response = await POST({
+			request: new Request("http://localhost/api/run", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					prompt: "hello",
+					routingMode: "cost",
+					runId: clientRunId,
+				}),
+			}),
+		});
+
+		assert.equal(response.status, 200);
+		const body = await response.json();
+		assert.equal(body.runId, clientRunId);
+		assert.equal(globalThis.__apiRunTestState.calls[0].runId, clientRunId);
+	} finally {
+		await server.close();
+	}
+});
+
 test("tracePipelineRun creates a parent 'agentflow.pipeline' trace scoped by sessionId=runId", async () => {
 	const state = resetLangfuseState();
 	const { module, server } = await loadLangfuseModule();
@@ -637,6 +743,215 @@ test("estimateCostUsd applies per-model pricing and falls back to $0 for unknown
 		});
 		const expectedMixed = (12 * 15 + 34 * 75) / 1_000_000;
 		assert.ok(Math.abs(mixed - expectedMixed) < 1e-12);
+	} finally {
+		await server.close();
+	}
+});
+
+test("fetchRunTraces maps Langfuse API observations to per-agent rows, HITL row, and aggregate", async () => {
+	const state = resetLangfuseState();
+	const pipelineTraceId = "trace-pipeline";
+	const hitlTraceId = "trace-hitl";
+	const observation = (id, name, type, parentObservationId, overrides = {}) => ({
+		id,
+		name,
+		type,
+		parentObservationId,
+		latency: null,
+		usageDetails: {},
+		metadata: {},
+		...overrides,
+	});
+	state.traceList = async () => ({
+		data: [
+			{ id: pipelineTraceId, name: "agentflow.pipeline" },
+			{ id: hitlTraceId, name: "agentflow.hitl_decision" },
+		],
+		meta: { page: 1, limit: 50, totalItems: 2, totalPages: 1 },
+	});
+	state.traceGet = async (traceId) => {
+		if (traceId === pipelineTraceId) {
+			return {
+				id: pipelineTraceId,
+				name: "agentflow.pipeline",
+				observations: [
+					observation("obs-q", "agentflow.agent.qualifier", "AGENT", null, {
+						latency: 0.9,
+						metadata: { costUsd: 0.00002 },
+					}),
+					observation("gen-q", "Qualifier generation", "GENERATION", "obs-q", {
+						latency: 0.9,
+						usageDetails: { input: 12, output: 34, total: 46 },
+					}),
+					observation("obs-a", "agentflow.agent.architect", "AGENT", null, {
+						latency: 1.2,
+						metadata: { costUsd: 0.015 },
+					}),
+					observation("gen-a", "Architect generation", "GENERATION", "obs-a", {
+						latency: 1.2,
+						usageDetails: { input: 100, output: 200, total: 300 },
+					}),
+					observation("obs-r", "agentflow.agent.riskChecker", "AGENT", null, {
+						latency: 1.3,
+						metadata: { costUsd: 0.00004 },
+					}),
+					observation("gen-r", "Risk Checker generation", "GENERATION", "obs-r", {
+						latency: 1.3,
+						usageDetails: { input: 5, output: 9, total: 14 },
+					}),
+				],
+				scores: [
+					{ name: "eval_score", value: 4, observationId: "obs-r" },
+				],
+			};
+		}
+		if (traceId === hitlTraceId) {
+			return {
+				id: hitlTraceId,
+				name: "agentflow.hitl_decision",
+				observations: [
+					observation("obs-h", "agentflow.hitl_decision", "SPAN", null, {
+						metadata: { decision: "approved", humanLatencyMs: 1234, diff: [] },
+					}),
+				],
+				scores: [{ name: "human_latency_ms", value: 1234 }],
+			};
+		}
+		throw new Error(`unexpected trace id ${traceId}`);
+	};
+	const { module, server } = await loadLangfuseModule();
+	try {
+		const summary = await module.fetchRunTraces("run-1");
+
+		assert.equal(summary.available, true);
+		assert.equal(summary.found, true);
+		assert.equal(summary.agents.length, 3);
+
+		const qualifier = summary.agents.find((item) => item.agent === "qualifier");
+		assert.equal(qualifier.label, "Qualifier");
+		assert.equal(qualifier.latencyMs, 900);
+		assert.equal(qualifier.tokenCount, 46);
+		assert.equal(qualifier.costUsd, 0.00002);
+		assert.equal(qualifier.evalScore, null);
+
+		const architect = summary.agents.find((item) => item.agent === "architect");
+		assert.equal(architect.latencyMs, 1200);
+		assert.equal(architect.tokenCount, 300);
+		assert.equal(architect.costUsd, 0.015);
+
+		const riskChecker = summary.agents.find((item) => item.agent === "riskChecker");
+		assert.equal(riskChecker.latencyMs, 1300);
+		assert.equal(riskChecker.tokenCount, 14);
+		assert.equal(riskChecker.costUsd, 0.00004);
+		assert.equal(riskChecker.evalScore, 4);
+
+		assert.equal(summary.hitl.decision, "approved");
+		assert.equal(summary.hitl.humanLatencyMs, 1234);
+		assert.equal(summary.aggregate.latencyMs, 3400);
+		assert.equal(summary.aggregate.totalTokens, 360);
+		assert.equal(summary.aggregate.costUsd, 0.00002 + 0.015 + 0.00004);
+		assert.equal(summary.aggregate.evalScore, 4);
+	} finally {
+		await server.close();
+	}
+});
+
+test("fetchRunTraces reports unavailable when Langfuse is not configured", async () => {
+	resetLangfuseState();
+	globalThis.__langfuseTestEnv = {};
+	const { module, server } = await loadLangfuseModule();
+	try {
+		const summary = await module.fetchRunTraces("run-1");
+		assert.equal(summary.available, false);
+		assert.equal(summary.found, false);
+		assert.equal(summary.agents.length, 3);
+		assert.equal(summary.agents[0].latencyMs, null);
+		assert.equal(summary.hitl, null);
+		assert.equal(summary.aggregate.latencyMs, null);
+	} finally {
+		await server.close();
+	}
+});
+
+test("GET /api/traces returns the run trace summary from the Langfuse API client", async () => {
+	globalThis.__tracesRouteState = { calls: [] };
+	const langfuseMock = `
+		export async function fetchRunTraces(runId) {
+			globalThis.__tracesRouteState.calls.push(runId);
+			return {
+				runId,
+				available: true,
+				found: true,
+				agents: [
+					{
+						agent: "qualifier",
+						label: "Qualifier",
+						latencyMs: 900,
+						tokenCount: 46,
+						costUsd: 0.00002,
+						evalScore: null,
+					},
+				],
+				hitl: null,
+				aggregate: {
+					latencyMs: 900,
+					totalTokens: 46,
+					costUsd: 0.00002,
+					evalScore: null,
+				},
+			};
+		}
+	`;
+	const server = await createMockedServer({
+		"$lib/pipeline/langfuse": langfuseMock,
+		"src/lib/pipeline/langfuse": langfuseMock,
+	});
+	try {
+		const { GET } = await server.ssrLoadModule(
+			"/src/routes/api/traces/+server.ts",
+		);
+		const response = await GET({
+			url: new URL("http://localhost/api/traces?runId=run-1"),
+			request: new Request("http://localhost/api/traces?runId=run-1"),
+		});
+
+		assert.equal(response.status, 200);
+		const body = await response.json();
+		assert.equal(body.available, true);
+		assert.equal(body.found, true);
+		assert.equal(body.agents[0].agent, "qualifier");
+		assert.equal(body.aggregate.latencyMs, 900);
+		assert.deepEqual(globalThis.__tracesRouteState.calls, ["run-1"]);
+	} finally {
+		await server.close();
+	}
+});
+
+test("GET /api/traces rejects a missing runId", async () => {
+	const server = await createMockedServer({
+		"$lib/pipeline/langfuse": `
+			export async function fetchRunTraces() {
+				throw new Error("should not be called");
+			}
+		`,
+		"src/lib/pipeline/langfuse": `
+			export async function fetchRunTraces() {
+				throw new Error("should not be called");
+			}
+		`,
+	});
+	try {
+		const { GET } = await server.ssrLoadModule(
+			"/src/routes/api/traces/+server.ts",
+		);
+		const response = await GET({
+			url: new URL("http://localhost/api/traces"),
+			request: new Request("http://localhost/api/traces"),
+		});
+
+		assert.equal(response.status, 400);
+		const body = await response.json();
+		assert.ok(body.error.includes("runId"));
 	} finally {
 		await server.close();
 	}

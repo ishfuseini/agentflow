@@ -1,11 +1,16 @@
 <script lang="ts">
+  import type { DiagramUnavailableReason } from "$lib/diagram/render";
   import type { FinalPocOutputView } from "./types";
 
   interface Props {
     output: FinalPocOutputView | null;
+    /** Self-contained diagram HTML, or null when no diagram is available */
+    diagramHtml: string | null;
+    /** Why no diagram is available, when there is none */
+    diagramUnavailable: DiagramUnavailableReason | null;
   }
 
-  let { output }: Props = $props();
+  let { output, diagramHtml, diagramUnavailable }: Props = $props();
 
   const sections = $derived(
     output
@@ -88,6 +93,25 @@
         </section>
       {/each}
     </div>
+
+    <section class="mt-5">
+      <h3 class="font-heading text-sm font-semibold text-darkcyan-700">
+        Architecture
+      </h3>
+      {#if diagramHtml}
+        <iframe
+          class="mt-2 h-[420px] w-full rounded-md border border-darkgrey-300 bg-[#020617]"
+          srcdoc={diagramHtml}
+          title="Architecture diagram"
+        ></iframe>
+      {:else}
+        <p class="mt-2 text-sm leading-snug text-foreground-muted">
+          {diagramUnavailable === "weak-match"
+            ? "No architecture diagram — the pattern match was low-confidence, so no reference diagram is available."
+            : "No architecture diagram available for this scenario."}
+        </p>
+      {/if}
+    </section>
   {:else}
     <header>
       <h2 class="font-heading text-xl font-semibold text-rebeccapurple-500">
