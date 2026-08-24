@@ -1,5 +1,6 @@
 <script lang="ts">
   import { RotateCcw, Send } from "@lucide/svelte";
+  import type { DiagramUnavailableReason } from "$lib/diagram/render";
   import { SCENARIOS } from "$lib/pipeline/scenarios";
   import OutputPanel from "./output-panel.svelte";
   import type { ChatMessage, FinalPocOutputView } from "./types";
@@ -9,12 +10,22 @@
     disabled: boolean;
     canReset: boolean;
     output: FinalPocOutputView | null;
+    diagramHtml: string | null;
+    diagramUnavailable: DiagramUnavailableReason | null;
     onSend: (prompt: string, domain?: string) => void;
     onReset: () => void;
   }
 
-  let { messages, disabled, canReset, output, onSend, onReset }: Props =
-    $props();
+  let {
+    messages,
+    disabled,
+    canReset,
+    output,
+    diagramHtml,
+    diagramUnavailable,
+    onSend,
+    onReset,
+  }: Props = $props();
   let draft = $state("");
   let activeTab = $state<"chat" | "results">("chat");
 
@@ -170,7 +181,7 @@
     </form>
   {:else}
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <OutputPanel {output} />
+      <OutputPanel {diagramHtml} {diagramUnavailable} {output} />
     </div>
   {/if}
 </aside>
