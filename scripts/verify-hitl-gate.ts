@@ -95,7 +95,10 @@ async function runScenario(
 		domain: scenario.domain,
 	});
 
-	expect(result.status === "paused", `${scenario.name} returns paused status`);
+	expect(
+		(result.status as string) === "paused",
+		`${scenario.name} returns paused status`,
+	);
 	expect(typeof result.runId === "string", `${scenario.name} returns runId`);
 	expect(
 		result.gate.riskPolicy?.hitl_required === true,
@@ -128,8 +131,14 @@ console.log("\n4.3 / 4.5 — approve resumes with unchanged plan");
 const approved = await postJson<HitlCompletedResponse>("/api/hitl/approve", {
 	runId: healthcare.runId,
 });
-expect(approved.status === "completed", "approve returns completed status");
-expect(approved.decision === "approved", "approve logs approved decision");
+expect(
+	(approved.status as string) === "completed",
+	"approve returns completed status",
+);
+expect(
+	(approved.decision as string) === "approved",
+	"approve logs approved decision",
+);
 expect(approved.humanLatencyMs >= 0, "approve captures human latency");
 expect(
 	typeof approved.telemetryLogged === "boolean",
@@ -154,8 +163,11 @@ const edited = await postJson<HitlCompletedResponse>("/api/hitl/edit", {
 	runId: fsi.runId,
 	pocPlan: editedPlan,
 });
-expect(edited.status === "completed", "edit returns completed status");
-expect(edited.decision === "edited", "edit logs edited decision");
+expect(
+	(edited.status as string) === "completed",
+	"edit returns completed status",
+);
+expect((edited.decision as string) === "edited", "edit logs edited decision");
 expect(edited.humanLatencyMs >= 0, "edit captures human latency");
 expect(
 	typeof edited.telemetryLogged === "boolean",
