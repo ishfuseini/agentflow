@@ -1,4 +1,4 @@
-import { type RunItem, run } from "@openai/agents";
+import { type Agent, type RunItem, type RunResult, run } from "@openai/agents";
 import { createArchitectAgent } from "$lib/agents/architect";
 import { createQualifierAgent } from "$lib/agents/qualifier";
 import { createRiskCheckerAgent } from "$lib/agents/risk-checker";
@@ -46,15 +46,46 @@ export interface PipelineResult {
 	traces: AgentTraceRecord[];
 }
 
-function parseJsonOrRaw(value: unknown): unknown {
-	if (typeof value !== "string") {
-		return value;
-	}
+function parseJsonText(text: string): unknown {
 	try {
-		return JSON.parse(value);
+		return JSON.parse(text);
 	} catch {
-		return value;
+		return text;
 	}
+}
+
+/**
+ * MCP tool outputs arrive as content blocks — a single `{ type: "text", text }
+ * object, a content-block array, or a `{ content: [...] }` envelope — with the
+ * JSON payload inside the text block. Unwraps that envelope so downstream
+ * consumers (diagram rendering, HITL gate) get structured data instead of
+ * opaque strings.
+ */
+function parseJsonOrRaw(value: unknown): unknown {
+	if (typeof value === "string") {
+		return parseJsonText(value);
+	}
+	if (Array.isArray(value)) {
+		const textBlock = value.find(
+			(block) =>
+				typeof block === "object" &&
+				block !== null &&
+				(block as { type?: unknown }).type === "text",
+		) as { text?: unknown } | undefined;
+		return typeof textBlock?.text === "string"
+			? parseJsonText(textBlock.text)
+			: value;
+	}
+	if (typeof value === "object" && value !== null) {
+		const record = value as { type?: unknown; text?: unknown; content?: unknown };
+		if (record.type === "text" && typeof record.text === "string") {
+			return parseJsonText(record.text);
+		}
+		if (Array.isArray(record.content)) {
+			return parseJsonOrRaw(record.content);
+		}
+	}
+	return value;
 }
 
 function requireFinalOutput<T>(output: T | undefined, agentName: string): T {
@@ -62,6 +93,28 @@ function requireFinalOutput<T>(output: T | undefined, agentName: string): T {
 		throw new Error(`${agentName} completed without final structured output.`);
 	}
 	return output;
+}
+
+/**
+ * The 20B cost model intermittently emits off-schema final output after
+ * several tool calls; the SDK then throws "Invalid output type". One retry
+ * with a fresh run keeps cost mode viable without masking real failures.
+ */
+async function runAgentWithOutputRetry<TAgent extends Agent<any, any>>(
+	agent: TAgent,
+	input: string,
+): Promise<RunResult<undefined, TAgent>> {
+	try {
+		return await run(agent, input);
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			error.message.includes("Invalid output type")
+		) {
+			return await run(agent, input);
+		}
+		throw error;
+	}
 }
 
 /**
@@ -136,6 +189,8 @@ export async function runPipeline(
 			prompt,
 			routingMode,
 			execute: async () => {
+				let currentAgent = "Requirements Agent";
+				try {
 				const { result: qualifierResult, trace: qualifierTrace } =
 					await traceAgentRun({
 						runId,
@@ -145,13 +200,14 @@ export async function runPipeline(
 						model: models.qualifier,
 						input: prompt,
 						execute: () =>
-							run(createQualifierAgent(models.qualifier.model), prompt),
+							runAgentWithOutputRetry(createQualifierAgent(models.qualifier.model), prompt),
 					});
 				const qualifierOutput: QualifierOutput = requireFinalOutput(
 					qualifierResult.finalOutput,
 					"Requirements Agent",
 				);
 
+				currentAgent = "Architect Agent";
 				const architectInput = domain
 					? `${JSON.stringify(qualifierOutput)}\n\nCustomer company domain hint — use verbatim as the "domain" argument for brand_context_lookup: ${domain}`
 					: JSON.stringify(qualifierOutput);
@@ -164,7 +220,7 @@ export async function runPipeline(
 						model: models.architect,
 						input: architectInput,
 						execute: () =>
-							run(
+							runAgentWithOutputRetry(
 								createArchitectAgent(models.architect.model, architectServer),
 								architectInput,
 							),
@@ -174,6 +230,7 @@ export async function runPipeline(
 					"Architect Agent",
 				);
 
+				currentAgent = "Risk Agent";
 				const riskCheckerInput = JSON.stringify(architectOutput);
 				const { result: riskCheckerResult, trace: riskCheckerTrace } =
 					await traceAgentRun({
@@ -184,7 +241,7 @@ export async function runPipeline(
 						model: models.riskChecker,
 						input: riskCheckerInput,
 						execute: () =>
-							run(
+							runAgentWithOutputRetry(
 								createRiskCheckerAgent(
 									models.riskChecker.model,
 									riskCheckerServer,
@@ -208,6 +265,11 @@ export async function runPipeline(
 					],
 					traces: [qualifierTrace, architectTrace, riskCheckerTrace],
 				};
+				} catch (error) {
+					throw new Error(
+						`${currentAgent} failed: ${error instanceof Error ? error.message : error}`,
+					);
+				}
 			},
 		});
 
@@ -256,7 +318,7 @@ export async function runSingleAgent(
 			routingMode,
 			model: models.qualifier,
 			input: prompt,
-			execute: () => run(createQualifierAgent(models.qualifier.model), prompt),
+			execute: () => runAgentWithOutputRetry(createQualifierAgent(models.qualifier.model), prompt),
 		});
 		const output: QualifierOutput = requireFinalOutput(
 			result.finalOutput,
@@ -285,7 +347,7 @@ export async function runSingleAgent(
 				model: models.architect,
 				input: architectInput,
 				execute: () =>
-					run(
+					runAgentWithOutputRetry(
 						createArchitectAgent(models.architect.model, architectServer),
 						architectInput,
 					),
@@ -318,7 +380,7 @@ export async function runSingleAgent(
 			model: models.riskChecker,
 			input: riskCheckerInput,
 			execute: () =>
-				run(
+				runAgentWithOutputRetry(
 					createRiskCheckerAgent(models.riskChecker.model, riskCheckerServer),
 					riskCheckerInput,
 				),

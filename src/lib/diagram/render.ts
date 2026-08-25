@@ -1,8 +1,9 @@
 /**
  * Architecture diagram renderer (architecture-diagram spec).
  *
- * Turns the `diagram_data` returned by agentflow-mcp's `arch_pattern_lookup`
- * into a self-contained HTML document with inline CSS and SVG, following the
+ * Turns the `diagram_data` returned by agentflow-mcp's `arch_diagram` tool
+ * (fetched on demand via /api/diagram, after risk evaluation) into a
+ * self-contained HTML document with inline CSS and SVG, following the
  * design system in docs/agent/architecture-diagram/SKILL.md: slate-950 grid
  * background, JetBrains Mono, rounded component rects, semantic component
  * colors, dashed amber region boundaries.
@@ -639,21 +640,16 @@ export function renderDiagramHtml(options: RenderDiagramOptions): string {
 /** Minimal shape of a captured MCP tool call (see PipelineResult.toolCalls). */
 interface ToolCallLike {
 	tool: string;
+	arguments?: unknown;
 	result: unknown;
 }
 
 /** Why no diagram is available, when there is none. */
 export type DiagramUnavailableReason = "weak-match" | "no-diagram-data";
 
-export interface DiagramSource {
-	diagram: DiagramData | null;
-	brand: BrandContext | null;
-	unavailable: DiagramUnavailableReason | null;
-}
-
 // Tool names are duplicated from $lib/mcp/server rather than imported: that
 // module reads private env and must not be pulled into the browser bundle.
-const ARCH_PATTERN_LOOKUP = "arch_pattern_lookup";
+const BRAND_SEARCH = "brand_search";
 const BRAND_CONTEXT_LOOKUP = "brand_context_lookup";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -723,50 +719,70 @@ function parseBoundaries(value: unknown): DiagramBoundary[] {
 }
 
 /**
- * Pulls the diagram inputs out of a run's MCP tool calls: `diagram_data` from
- * `arch_pattern_lookup` and the header brand from `brand_context_lookup`.
- *
- * A curated match (confidence >= 0.85) carries `diagram_data`; the generic
- * fallback pattern (confidence < 0.5) does not, and yields no diagram. Brand
- * context is independently optional — its absence only costs the logo.
+ * Validates an `arch_diagram` tool result's `diagram_data` payload. Returns
+ * null when the payload is missing or carries no renderable components (the
+ * fallback pattern returns available=false with diagram_data=null).
  */
-export function diagramSourceFromToolCalls(
-	toolCalls: readonly ToolCallLike[],
-): DiagramSource {
-	const archResult = asRecord(
-		toolCalls.find((call) => call.tool === ARCH_PATTERN_LOOKUP)?.result,
-	);
-	const brandResult = asRecord(
-		toolCalls.find((call) => call.tool === BRAND_CONTEXT_LOOKUP)?.result,
-	);
-
-	const companyName = asStringArrayItem(brandResult?.company_name);
-	const logoUrl = asStringArrayItem(brandResult?.logo_url);
-	const brand = companyName || logoUrl ? { companyName, logoUrl } : null;
-
-	const diagramData = asRecord(archResult?.diagram_data);
-	if (!diagramData) {
-		const confidence = archResult?.confidence;
-		const weak = typeof confidence === "number" && confidence < 0.5;
-		return {
-			diagram: null,
-			brand,
-			unavailable: weak ? "weak-match" : "no-diagram-data",
-		};
+export function parseDiagramData(value: unknown): DiagramData | null {
+	const record = asRecord(value);
+	if (!record) {
+		return null;
 	}
-
-	const components = parseComponents(diagramData.components);
+	const components = parseComponents(record.components);
 	if (components.length === 0) {
-		return { diagram: null, brand, unavailable: "no-diagram-data" };
+		return null;
+	}
+	return {
+		components,
+		connections: parseConnections(record.connections),
+		boundaries: parseBoundaries(record.boundaries),
+	};
+}
+
+/**
+ * Pulls the confirmed brand out of a run's MCP tool calls. The logo and name
+ * come from the `brand_search` candidate the Architect selected (matched by
+ * the domain passed to `brand_context_lookup`), because brand_search is what
+ * surfaces the logo in the conversation; `brand_context_lookup` enriches but
+ * is not the logo source. Falls back to the brand_context_lookup result when
+ * brand_search was skipped (explicit domain hint) — and to null when brand
+ * context is unavailable, which only costs the logo.
+ */
+export function brandFromToolCalls(
+	toolCalls: readonly ToolCallLike[],
+): BrandContext | null {
+	const searchResult = asRecord(
+		toolCalls.find((call) => call.tool === BRAND_SEARCH)?.result,
+	);
+	const contextCall = toolCalls.find(
+		(call) => call.tool === BRAND_CONTEXT_LOOKUP,
+	);
+	const contextDomain = asStringArrayItem(
+		asRecord(contextCall?.arguments)?.domain,
+	);
+
+	if (Array.isArray(searchResult?.candidates)) {
+		const candidates = searchResult.candidates
+			.map(asRecord)
+			.filter(
+				(candidate): candidate is Record<string, unknown> => candidate !== null,
+			);
+		const selected =
+			(contextDomain
+				? candidates.find(
+						(candidate) =>
+							asStringArrayItem(candidate.domain) === contextDomain,
+					)
+				: undefined) ?? candidates[0];
+		const companyName = asStringArrayItem(selected?.name);
+		const logoUrl = asStringArrayItem(selected?.logo_url);
+		if (companyName || logoUrl) {
+			return { companyName, logoUrl };
+		}
 	}
 
-	return {
-		diagram: {
-			components,
-			connections: parseConnections(diagramData.connections),
-			boundaries: parseBoundaries(diagramData.boundaries),
-		},
-		brand,
-		unavailable: null,
-	};
+	const contextResult = asRecord(contextCall?.result);
+	const companyName = asStringArrayItem(contextResult?.company_name);
+	const logoUrl = asStringArrayItem(contextResult?.logo_url);
+	return companyName || logoUrl ? { companyName, logoUrl } : null;
 }

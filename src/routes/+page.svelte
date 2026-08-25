@@ -33,9 +33,8 @@
     TraceTotals,
   } from "$lib/components/pipeline/types";
   import {
+    brandFromToolCalls,
     type DiagramUnavailableReason,
-    diagramSourceFromToolCalls,
-    renderDiagramHtml,
   } from "$lib/diagram/render";
   import type { RunTraceSummary } from "$lib/pipeline/langfuse";
   import type { RoutingMode } from "$lib/pipeline/routing";
@@ -87,6 +86,7 @@
   let finalOutput = $state<FinalPocOutputView | null>(null);
   let diagramHtml = $state<string | null>(null);
   let diagramUnavailable = $state<DiagramUnavailableReason | null>(null);
+  let diagramLoading = $state(false);
   let activeRunId = $state<string | null>(null);
   let editPlanOpen = $state(false);
   let editPlanText = $state("");
@@ -95,7 +95,7 @@
    * sends all of it back so the server can assemble the run and open the gate.
    */
   let qualifierOutput: QualifierOutput | null = null;
-  let architectOutput: ArchitectOutput | null = null;
+  let architectOutput = $state<ArchitectOutput | null>(null);
   let runToolCalls: PipelineView["toolCalls"] = [];
   /** The ask and customer domain for the run in flight, reused by every step. */
   let activePrompt = "";
@@ -166,18 +166,28 @@
         state: "idle",
         steps: [
           {
-            id: "arch_pattern",
-            label: "arch_pattern_lookup",
-            status: "pending",
-          },
-          {
-            id: "tool_selection",
-            label: "tool_selection_lookup",
+            id: "brand_search",
+            label: "brand_search",
             status: "pending",
           },
           {
             id: "brand_context",
             label: "brand_context_lookup",
+            status: "pending",
+          },
+          {
+            id: "arch_pattern",
+            label: "arch_pattern_lookup",
+            status: "pending",
+          },
+          {
+            id: "arch_references",
+            label: "arch_pattern_references",
+            status: "pending",
+          },
+          {
+            id: "tool_selection",
+            label: "tool_selection_lookup",
             status: "pending",
           },
           {
@@ -222,7 +232,7 @@
         id: "mcpTools",
         label: "MCP Tools",
         subtitle:
-          "Architecture patterns, tool selection, brand context, risk policies",
+          "Brand search & context, architecture patterns, references, diagrams, tool selection, risk policies",
         state: "idle",
       },
     ];
@@ -366,8 +376,20 @@
     syncFlow();
   }
 
-  function addMessage(role: ChatMessage["role"], text: string): void {
-    messages = [...messages, { id: crypto.randomUUID(), role, text }];
+  function addMessage(
+    role: ChatMessage["role"],
+    text: string,
+    logo?: { url: string; alt: string },
+  ): void {
+    messages = [
+      ...messages,
+      {
+        id: crypto.randomUUID(),
+        role,
+        text,
+        ...(logo ? { logoUrl: logo.url, logoAlt: logo.alt } : {}),
+      },
+    ];
   }
 
   function resetTraceTotals(): void {
@@ -385,6 +407,7 @@
     finalOutput = null;
     diagramHtml = null;
     diagramUnavailable = null;
+    diagramLoading = false;
     activeRunId = null;
     editPlanOpen = false;
     editPlanText = "";
@@ -411,6 +434,7 @@
     finalOutput = null;
     diagramHtml = null;
     diagramUnavailable = null;
+    diagramLoading = false;
     activeRunId = null;
     editPlanOpen = false;
     editPlanText = "";
@@ -562,7 +586,7 @@
         qualifierOutput = payload.output as QualifierOutput;
       } else if (agentId === "architect") {
         architectOutput = payload.output as ArchitectOutput;
-        applyDiagram(architectOutput, runToolCalls);
+        announceBrand(runToolCalls);
       }
 
       addMessage(
@@ -785,24 +809,76 @@
   }
 
   /**
-   * Builds the architecture diagram from the run's MCP tool calls: diagram_data
-   * from arch_pattern_lookup, header brand from brand_context_lookup. A
-   * low-confidence pattern match carries no diagram_data and renders none.
+   * Shows the confirmed brand in the conversation: the logo comes from the
+   * brand_search candidate the Architect selected (or brand_context_lookup
+   * when an explicit domain hint skipped the search). Logo first — the deeper
+   * context is what the Architect then grounds the plan in.
    */
-  function applyDiagram(
-    architect: ArchitectOutput,
-    toolCalls: PipelineView["toolCalls"],
-  ): void {
-    const source = diagramSourceFromToolCalls(toolCalls);
-    diagramUnavailable = source.unavailable;
-    diagramHtml = source.diagram
-      ? renderDiagramHtml({
-          diagram: source.diagram,
-          brand: source.brand,
-          fallbackTitle: architect.pattern_match.pattern_id.replace(/_/g, " "),
-          subtitle: architect.architecture_summary,
-        })
-      : null;
+  function announceBrand(toolCalls: PipelineView["toolCalls"]): void {
+    const brand = brandFromToolCalls(toolCalls);
+    if (!brand) {
+      return;
+    }
+    addMessage(
+      "system",
+      `Brand context confirmed: ${brand.companyName ?? "customer brand"}`,
+      brand.logoUrl
+        ? { url: brand.logoUrl, alt: `${brand.companyName ?? "Company"} logo` }
+        : undefined,
+    );
+  }
+
+  /**
+   * Fetches the architecture diagram on demand via /api/diagram. arch_diagram
+   * is only called here — after the run (and therefore risk evaluation) has
+   * completed — never by an agent mid-pipeline.
+   */
+  async function requestDiagram(): Promise<void> {
+    if (!architectOutput || diagramLoading || diagramHtml) {
+      return;
+    }
+    diagramLoading = true;
+    try {
+      const response = await fetch("/api/diagram", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          patternId: architectOutput.pattern_match.pattern_id,
+          brand: brandFromToolCalls(runToolCalls),
+          fallbackTitle: architectOutput.pattern_match.pattern_id.replace(
+            /_/g,
+            " ",
+          ),
+          subtitle: architectOutput.architecture_summary,
+        }),
+      });
+      const payload = (await response.json()) as
+        | { status: "ok"; html: string }
+        | { status: "unavailable"; message: string }
+        | { error: string };
+      if (!response.ok || "error" in payload) {
+        throw new Error(
+          "error" in payload ? payload.error : "Diagram fetch failed",
+        );
+      }
+      if (payload.status === "ok") {
+        diagramHtml = payload.html;
+        diagramUnavailable = null;
+      } else {
+        diagramHtml = null;
+        diagramUnavailable = architectOutput.pattern_match.weak_match
+          ? "weak-match"
+          : "no-diagram-data";
+        addMessage("system", payload.message);
+      }
+    } catch (error) {
+      addMessage(
+        "system",
+        error instanceof Error ? error.message : "Diagram fetch failed.",
+      );
+    } finally {
+      diagramLoading = false;
+    }
   }
 
   /**
@@ -984,11 +1060,22 @@
       <ChatPanel
         awaitingConfirmation={runState === "awaiting-confirmation"}
         canReset={runState !== "idle" || messages.length > 0}
+        diagramAvailable={architectOutput !== null &&
+          !architectOutput.pattern_match.weak_match}
         {diagramHtml}
+        {diagramLoading}
         {diagramUnavailable}
         disabled={isInteractionLocked}
         {messages}
         onConfirm={confirmNextAgent}
+        onRequestDiagram={() => {
+          requestDiagram().catch((error: unknown) => {
+            addMessage(
+              "system",
+              error instanceof Error ? error.message : "Diagram fetch failed.",
+            );
+          });
+        }}
         onReset={resetConversation}
         onRoutingModeChange={(mode) => {
           routingMode = mode;

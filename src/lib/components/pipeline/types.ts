@@ -21,6 +21,9 @@ export interface ChatMessage {
 	id: string;
 	role: ChatRole;
 	text: string;
+	/** Brand logo shown inside the bubble (from the confirmed brand_search candidate) */
+	logoUrl?: string;
+	logoAlt?: string;
 }
 
 /** Streaming token view for an agent (kept for the LLMStreamBlock component). */

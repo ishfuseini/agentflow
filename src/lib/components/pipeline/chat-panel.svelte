@@ -13,12 +13,17 @@
     output: FinalPocOutputView | null;
     diagramHtml: string | null;
     diagramUnavailable: DiagramUnavailableReason | null;
+    /** True while the on-demand arch_diagram fetch is in flight */
+    diagramLoading: boolean;
+    /** True when the run's pattern match supports a diagram (not weak) */
+    diagramAvailable: boolean;
     routingMode: RoutingMode;
     awaitingConfirmation: boolean;
     onRoutingModeChange: (mode: RoutingMode) => void;
     onSend: (prompt: string, domain?: string) => void;
     onReset: () => void;
     onConfirm: () => void;
+    onRequestDiagram: () => void;
   }
 
   let {
@@ -28,12 +33,15 @@
     output,
     diagramHtml,
     diagramUnavailable,
+    diagramLoading,
+    diagramAvailable,
     routingMode,
     awaitingConfirmation,
     onRoutingModeChange,
     onSend,
     onReset,
     onConfirm,
+    onRequestDiagram,
   }: Props = $props();
   let draft = $state("");
   let activeTab = $state<"chat" | "results">("chat");
@@ -202,6 +210,14 @@
 									: "rounded-bl-sm border-darkgrey-300 bg-[color-mix(in_oklch,var(--color-background),white_42%)] text-foreground"
 							}`}
             >
+              {#if message.logoUrl}
+                <img
+                  alt={message.logoAlt ?? "Company logo"}
+                  class="mb-2 h-8 max-w-32 rounded-sm bg-white object-contain"
+                  src={message.logoUrl}
+                >
+                <br>
+              {/if}
               {message.text}
             </p>
           </div>
@@ -278,7 +294,14 @@
     {/if}
   {:else}
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <OutputPanel {diagramHtml} {diagramUnavailable} {output} />
+      <OutputPanel
+        {diagramAvailable}
+        {diagramHtml}
+        {diagramLoading}
+        {diagramUnavailable}
+        {onRequestDiagram}
+        {output}
+      />
     </div>
   {/if}
 </aside>
