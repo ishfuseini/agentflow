@@ -14,19 +14,30 @@ import { env } from "$env/dynamic/private";
  * module only implements the remote HTTP transport.
  */
 
-/** The four tools exposed by the agentflow-mcp server. */
+/** The seven tools exposed by the agentflow-mcp server. */
 export const MCP_TOOL_NAMES = {
-	archPatternLookup: "arch_pattern_lookup",
-	toolSelectionLookup: "tool_selection_lookup",
+	brandSearch: "brand_search",
 	brandContextLookup: "brand_context_lookup",
+	archPatternLookup: "arch_pattern_lookup",
+	archPatternReferences: "arch_pattern_references",
+	archDiagram: "arch_diagram",
+	toolSelectionLookup: "tool_selection_lookup",
 	riskPolicyLookup: "risk_policy_lookup",
 } as const;
 
-/** Tools the Architect Agent may call (per the integration contract). */
+/**
+ * Tools the Architect Agent may call (per the integration contract), in call
+ * order: brand resolution first (brand_search surfaces the logo, then
+ * brand_context_lookup enriches), then pattern lookup + references, then tool
+ * selection. `arch_diagram` is deliberately excluded — diagrams are fetched
+ * on demand via /api/diagram after risk evaluation, never by an agent.
+ */
 export const ARCHITECT_MCP_TOOLS = [
-	MCP_TOOL_NAMES.archPatternLookup,
-	MCP_TOOL_NAMES.toolSelectionLookup,
+	MCP_TOOL_NAMES.brandSearch,
 	MCP_TOOL_NAMES.brandContextLookup,
+	MCP_TOOL_NAMES.archPatternLookup,
+	MCP_TOOL_NAMES.archPatternReferences,
+	MCP_TOOL_NAMES.toolSelectionLookup,
 ] as const;
 
 /** Tools the Risk Checker Agent may call. */

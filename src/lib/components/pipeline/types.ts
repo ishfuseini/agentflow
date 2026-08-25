@@ -7,7 +7,13 @@ import type {
 } from "$lib/agents/types";
 import type { RoutingMode } from "$lib/pipeline/routing";
 
-export type AgentId = "qualifier" | "architect" | "riskChecker" | "hitl";
+export type AgentId =
+	| "qualifier"
+	| "architect"
+	| "riskChecker"
+	| "hitl"
+	| "orchestrator"
+	| "mcpTools";
 export type AgentNodeState = "idle" | "running" | "done" | "warning" | "paused";
 export type ChatRole = "user" | "system";
 
@@ -15,6 +21,9 @@ export interface ChatMessage {
 	id: string;
 	role: ChatRole;
 	text: string;
+	/** Brand logo shown inside the bubble (from the confirmed brand_search candidate) */
+	logoUrl?: string;
+	logoAlt?: string;
 }
 
 /** Streaming token view for an agent (kept for the LLMStreamBlock component). */
@@ -25,7 +34,15 @@ export interface AgentStreamView {
 	status: "idle" | "streaming" | "done";
 }
 
-/** Compact node card data — no per-step or tool-call content inside the graph nodes. */
+/** Step detail for agent execution tracking */
+export interface AgentStep {
+	id: string;
+	label: string;
+	status: "pending" | "running" | "done" | "warning";
+	detail?: string;
+}
+
+/** Node card data with step tracking and tool-call details */
 export interface AgentNodeData {
 	id: AgentId;
 	label: string;
@@ -34,16 +51,18 @@ export interface AgentNodeData {
 	riskSummary?: RiskItem[];
 	reviewReason?: string;
 	proposedPlan?: PocPlan;
+	steps?: AgentStep[];
+	currentStep?: number;
 }
 
-export interface TraceSummaryRow {
+export interface TraceObservationRow {
 	id: string;
-	label: string;
-	status: "pending" | "running" | "done" | "warning";
+	name: string;
+	type: "SPAN" | "AGENT" | "GENERATION" | "EVENT";
 	latency: string;
 	tokens: string;
 	cost: string;
-	eval: string;
+	level: "DEFAULT" | "ERROR" | "WARNING";
 }
 
 export interface TraceTotals {

@@ -11,8 +11,11 @@
 import { MCPServerStreamableHttp } from "@openai/agents";
 
 const EXPECTED_TOOLS = [
+	"arch_diagram",
 	"arch_pattern_lookup",
+	"arch_pattern_references",
 	"brand_context_lookup",
+	"brand_search",
 	"risk_policy_lookup",
 	"tool_selection_lookup",
 ] as const;
@@ -45,7 +48,7 @@ try {
 		console.error(`✗ Missing tools: ${missing.join(", ")}`);
 		process.exitCode = 1;
 	} else {
-		console.log("✓ All 4 expected tools are discoverable");
+		console.log("✓ All 7 expected tools are discoverable");
 	}
 } catch (error) {
 	console.error(`✗ Failed to list tools from ${url}`);

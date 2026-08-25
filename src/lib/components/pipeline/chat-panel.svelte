@@ -1,6 +1,7 @@
 <script lang="ts">
   import { RotateCcw, Send } from "@lucide/svelte";
   import type { DiagramUnavailableReason } from "$lib/diagram/render";
+  import type { RoutingMode } from "$lib/pipeline/routing";
   import { SCENARIOS } from "$lib/pipeline/scenarios";
   import OutputPanel from "./output-panel.svelte";
   import type { ChatMessage, FinalPocOutputView } from "./types";
@@ -12,8 +13,17 @@
     output: FinalPocOutputView | null;
     diagramHtml: string | null;
     diagramUnavailable: DiagramUnavailableReason | null;
+    /** True while the on-demand arch_diagram fetch is in flight */
+    diagramLoading: boolean;
+    /** True when the run's pattern match supports a diagram (not weak) */
+    diagramAvailable: boolean;
+    routingMode: RoutingMode;
+    awaitingConfirmation: boolean;
+    onRoutingModeChange: (mode: RoutingMode) => void;
     onSend: (prompt: string, domain?: string) => void;
     onReset: () => void;
+    onConfirm: () => void;
+    onRequestDiagram: () => void;
   }
 
   let {
@@ -23,11 +33,24 @@
     output,
     diagramHtml,
     diagramUnavailable,
+    diagramLoading,
+    diagramAvailable,
+    routingMode,
+    awaitingConfirmation,
+    onRoutingModeChange,
     onSend,
     onReset,
+    onConfirm,
+    onRequestDiagram,
   }: Props = $props();
   let draft = $state("");
   let activeTab = $state<"chat" | "results">("chat");
+
+  $effect(() => {
+    if (output !== null && activeTab === "chat") {
+      activeTab = "results";
+    }
+  });
 
   function submitDraft(): void {
     const prompt = draft.trim();
@@ -62,7 +85,7 @@
   }
 </script>
 
-<aside class="flex h-full min-h-0 flex-col bg-background">
+<aside class="flex h-full min-h-0 flex-col overflow-hidden bg-background">
   <div class="shrink-0 p-4">
     <h2
       class="mb-2 font-heading text-sm font-semibold uppercase text-darkcyan-700"
@@ -82,6 +105,53 @@
       {/each}
     </div>
     <hr class="mt-4 border-t-2 border-darkgrey-300">
+
+    <fieldset class="mt-4" {disabled}>
+      <legend
+        class="mb-2 font-heading text-sm font-semibold uppercase text-darkcyan-700"
+      >
+        Routing Strategy
+      </legend>
+      <div
+        class="flex rounded-md border border-darkgrey-400 bg-darkgrey-50 p-1"
+      >
+        <label
+          class={`flex cursor-pointer items-center gap-2 flex-1 rounded-sm px-3 py-1.5 text-sm font-semibold transition ${
+            routingMode === "cost"
+              ? "bg-rebeccapurple-500 text-white"
+              : "text-foreground-muted hover:bg-darkgrey-200"
+          } disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          <input
+            checked={routingMode === "cost"}
+            class="sr-only"
+            name="routing-mode"
+            onchange={() => onRoutingModeChange("cost")}
+            type="radio"
+            value="cost"
+          >
+          Cost
+        </label>
+        <label
+          class={`flex cursor-pointer items-center gap-2 flex-1 rounded-sm px-3 py-1.5 text-sm font-semibold transition ${
+            routingMode === "intelligence"
+              ? "bg-rebeccapurple-500 text-white"
+              : "text-foreground-muted hover:bg-darkgrey-200"
+          } disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          <input
+            checked={routingMode === "intelligence"}
+            class="sr-only"
+            name="routing-mode"
+            onchange={() => onRoutingModeChange("intelligence")}
+            type="radio"
+            value="intelligence"
+          >
+          Intelligence
+        </label>
+      </div>
+    </fieldset>
+
     <div class="mt-4 flex items-center justify-between gap-3">
       <div
         aria-label="Chat sections"
@@ -126,7 +196,7 @@
 
   {#if activeTab === "chat"}
     <div
-      class="flex min-h-0 flex-1 flex-col justify-end overflow-y-auto px-4 pb-4"
+      class="flex min-h-0 flex-1 flex-col justify-end overflow-x-hidden overflow-y-auto px-4 pb-4"
     >
       <div class="space-y-3">
         {#each messages as message (message.id)}
@@ -134,54 +204,104 @@
             class={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <p
-              class={`max-w-[86%] whitespace-pre-wrap rounded-md border px-3 py-2 text-sm leading-snug ${
+              class={`max-w-[86%] whitespace-pre-wrap break-words rounded-md border px-3 py-2 text-sm leading-snug ${
 								message.role === "user"
 									? "rounded-br-sm border-darkgrey-300 bg-white text-foreground"
 									: "rounded-bl-sm border-darkgrey-300 bg-[color-mix(in_oklch,var(--color-background),white_42%)] text-foreground"
 							}`}
             >
+              {#if message.logoUrl}
+                <img
+                  alt={message.logoAlt ?? "Company logo"}
+                  class="mb-2 h-8 max-w-32 rounded-sm bg-white object-contain"
+                  src={message.logoUrl}
+                >
+                <br>
+              {/if}
               {message.text}
             </p>
           </div>
         {:else}
-          <p
-            class="rounded-md border border-darkgrey-300 bg-white p-3 text-sm text-foreground-muted"
-          >
-            Select a scenario or enter a custom presales ask.
-          </p>
+          <div class="space-y-3">
+            <p
+              class="rounded-md border border-darkgrey-300 bg-white p-3 text-sm text-foreground-muted"
+            >
+              Welcome! This pipeline uses three agents to qualify your POC:
+            </p>
+            <p
+              class="rounded-md border border-darkgrey-300 bg-[color-mix(in_oklch,var(--color-background),white_42%)] p-3 text-sm text-foreground"
+            >
+              <strong>Requirements Agent</strong>
+              extracts structured requirements from your ask.<br>
+              <strong>Architect Agent</strong>
+              designs the deployment architecture and POC plan, calling MCP
+              tools for pattern matching, tool selection, and brand context.<br>
+              <strong>Risk Agent</strong>
+              evaluates controls and compliance risks.<br>
+              <br>
+              A <strong>HITL Gate</strong> pauses the pipeline for human review
+              when high-severity risks or regulated data are detected.
+            </p>
+            <p
+              class="rounded-md border border-darkgrey-300 bg-white p-3 text-sm text-foreground-muted"
+            >
+              Select a scenario above or enter a custom presales ask.
+            </p>
+          </div>
         {/each}
       </div>
     </div>
 
-    <form
-      class="flex shrink-0 items-end gap-2 border-t-2 border-darkgrey-300 p-4"
-      onsubmit={(event) => {
-				event.preventDefault();
-				submitDraft();
-			}}
-    >
-      <label class="sr-only" for="agent-prompt">Message</label>
-      <textarea
-        class="min-h-9 flex-1 resize-none rounded-md border-2 border-darkgrey-300 bg-darkgrey-50 px-3 py-2 text-sm leading-tight outline-none transition focus:border-rebeccapurple-400 disabled:opacity-50"
-        {disabled}
-        id="agent-prompt"
-        onkeydown={handleKeydown}
-        placeholder="Describe the customer ask..."
-        rows="2"
-        bind:value={draft}
-      ></textarea>
-      <button
-        aria-label="Send message"
-        class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-rebeccapurple-500 text-white transition hover:bg-rebeccapurple-600 disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={disabled || draft.trim().length === 0}
-        type="submit"
+    {#if awaitingConfirmation}
+      <div
+        class="flex shrink-0 items-center justify-center gap-2 border-t-2 border-darkgrey-300 p-4"
       >
-        <Send aria-hidden="true" class="h-4 w-4" />
-      </button>
-    </form>
+        <button
+          class="rounded-md bg-rebeccapurple-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rebeccapurple-600"
+          onclick={onConfirm}
+          type="button"
+        >
+          ✓ Confirm & Continue
+        </button>
+      </div>
+    {:else}
+      <form
+        class="flex shrink-0 items-end gap-2 border-t-2 border-darkgrey-300 p-4"
+        onsubmit={(event) => {
+					event.preventDefault();
+					submitDraft();
+				}}
+      >
+        <label class="sr-only" for="agent-prompt">Message</label>
+        <textarea
+          class="min-h-9 flex-1 resize-none rounded-md border-2 border-darkgrey-300 bg-darkgrey-50 px-3 py-2 text-sm leading-tight outline-none transition focus:border-rebeccapurple-400 disabled:opacity-50"
+          {disabled}
+          id="agent-prompt"
+          onkeydown={handleKeydown}
+          placeholder="Describe your customer's data stack, constraints, and goals..."
+          rows="2"
+          bind:value={draft}
+        ></textarea>
+        <button
+          aria-label="Send message"
+          class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-rebeccapurple-500 text-white transition hover:bg-rebeccapurple-600 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={disabled || draft.trim().length === 0}
+          type="submit"
+        >
+          <Send aria-hidden="true" class="h-4 w-4" />
+        </button>
+      </form>
+    {/if}
   {:else}
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <OutputPanel {diagramHtml} {diagramUnavailable} {output} />
+      <OutputPanel
+        {diagramAvailable}
+        {diagramHtml}
+        {diagramLoading}
+        {diagramUnavailable}
+        {onRequestDiagram}
+        {output}
+      />
     </div>
   {/if}
 </aside>

@@ -8,9 +8,22 @@
     diagramHtml: string | null;
     /** Why no diagram is available, when there is none */
     diagramUnavailable: DiagramUnavailableReason | null;
+    /** True while the on-demand arch_diagram fetch is in flight */
+    diagramLoading: boolean;
+    /** True when the run's pattern match supports a diagram (not weak) */
+    diagramAvailable: boolean;
+    /** Fetches arch_diagram on demand and renders the result */
+    onRequestDiagram: () => void;
   }
 
-  let { output, diagramHtml, diagramUnavailable }: Props = $props();
+  let {
+    output,
+    diagramHtml,
+    diagramUnavailable,
+    diagramLoading,
+    diagramAvailable,
+    onRequestDiagram,
+  }: Props = $props();
 
   const sections = $derived(
     output
@@ -104,11 +117,26 @@
           srcdoc={diagramHtml}
           title="Architecture diagram"
         ></iframe>
-      {:else}
+      {:else if diagramUnavailable}
         <p class="mt-2 text-sm leading-snug text-foreground-muted">
           {diagramUnavailable === "weak-match"
             ? "No architecture diagram — the pattern match was low-confidence, so no reference diagram is available."
             : "No architecture diagram available for this scenario."}
+        </p>
+      {:else if diagramAvailable}
+        <button
+          class="mt-2 rounded-md border border-darkcyan-600 bg-darkgrey-50 px-3 py-2 text-sm font-semibold text-darkcyan-700 transition hover:bg-darkcyan-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={diagramLoading}
+          onclick={onRequestDiagram}
+          type="button"
+        >
+          {diagramLoading
+            ? "Fetching diagram from agentflow-mcp…"
+            : "Render architecture diagram"}
+        </button>
+      {:else}
+        <p class="mt-2 text-sm leading-snug text-foreground-muted">
+          No architecture diagram available for this scenario.
         </p>
       {/if}
     </section>

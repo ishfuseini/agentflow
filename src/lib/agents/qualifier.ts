@@ -2,10 +2,10 @@ import { Agent, type Model, type UnknownContext } from "@openai/agents";
 import { QualifierOutputSchema } from "./types";
 
 /**
- * Qualifier Agent prompt template.
+ * Requirements Agent prompt template.
  * Pure reasoning step — no tool calls (per the agentflow-mcp integration contract).
  */
-export const QUALIFIER_INSTRUCTIONS = `You are the Qualifier Agent in a pre-sales POC qualification pipeline. Your job is to turn a messy, underspecified customer ask into structured requirements.
+export const QUALIFIER_INSTRUCTIONS = `You are the Requirements Agent in a pre-sales POC qualification pipeline. Your job is to turn a messy, underspecified customer ask into structured requirements.
 
 You receive a free-text prompt from a partner or prospect describing what they want to build with AI. Extract structure from it — do not solve it, do not propose an architecture.
 
@@ -27,13 +27,13 @@ Respond with a single JSON object with exactly these keys:
 {"named_use_cases": string[], "partner_constraints": string[], "success_criteria": string[], "exit_criteria": string[], "ambiguity_flags": string[]}`;
 
 /**
- * Creates the Qualifier Agent. The model is injected per run by the routing layer.
+ * Creates the Requirements Agent. The model is injected per run by the routing layer.
  */
 export function createQualifierAgent(
 	model: Model,
 ): Agent<UnknownContext, typeof QualifierOutputSchema> {
 	return new Agent({
-		name: "Qualifier",
+		name: "Requirements Agent",
 		handoffDescription:
 			"Extracts structured requirements from a free-text pre-sales ask.",
 		instructions: QUALIFIER_INSTRUCTIONS,

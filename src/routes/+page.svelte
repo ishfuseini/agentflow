@@ -11,7 +11,12 @@
     SvelteFlow,
   } from "@xyflow/svelte";
   import { onDestroy, onMount } from "svelte";
-  import type { PocPlan } from "$lib/agents/types";
+  import type {
+    ArchitectOutput,
+    PocPlan,
+    QualifierOutput,
+    RiskCheckerOutput,
+  } from "$lib/agents/types";
   import AgentNodeCard from "$lib/components/pipeline/agent-node-card.svelte";
   import ChatPanel from "$lib/components/pipeline/chat-panel.svelte";
   import ConnectorEdge from "$lib/components/pipeline/connector-edge.svelte";
@@ -23,14 +28,13 @@
     ChatMessage,
     FinalPocOutputView,
     HitlCompletionResponse,
-    PipelineResponse,
-    TraceSummaryRow,
+    PipelineView,
+    TraceObservationRow,
     TraceTotals,
   } from "$lib/components/pipeline/types";
   import {
+    brandFromToolCalls,
     type DiagramUnavailableReason,
-    diagramSourceFromToolCalls,
-    renderDiagramHtml,
   } from "$lib/diagram/render";
   import type { RunTraceSummary } from "$lib/pipeline/langfuse";
   import type { RoutingMode } from "$lib/pipeline/routing";
@@ -42,20 +46,29 @@
     connector: ConnectorEdge,
   };
   /**
-   * Node row centered on the origin so the group sits mid-canvas; `fitView`
-   * then centers it in the viewport on init. Offsets account for the wider
-   * HITL card (220px) while keeping an even 20px gap between cards.
+   * Top-down flow: HITL (user) at top, Orchestrator below,
+   * agents in horizontal row, MCP Tools at bottom (called by agents).
+   * Clear top-to-bottom flow matching the architecture diagram.
+   * `fitView` centers the group in the viewport on init.
    */
   const nodePositions: Record<AgentId, { x: number; y: number }> = {
-    qualifier: { x: -320, y: 0 },
-    architect: { x: -120, y: 0 },
-    riskChecker: { x: 80, y: 0 },
-    hitl: { x: 300, y: 0 },
+    hitl: { x: 0, y: -200 },
+    orchestrator: { x: 0, y: -50 },
+    qualifier: { x: -200, y: 100 },
+    architect: { x: 0, y: 100 },
+    riskChecker: { x: 200, y: 100 },
+    mcpTools: { x: 0, y: 250 },
   };
 
   let routingMode: RoutingMode = $state("cost");
-  let runState: "idle" | "running" | "paused" | "completed" | "error" =
-    $state("idle");
+  let runState:
+    | "idle"
+    | "running"
+    | "paused"
+    | "awaiting-confirmation"
+    | "completed"
+    | "error" = $state("idle");
+  let pendingAgent: AgentId | null = $state(null);
   let messages = $state<ChatMessage[]>([]);
   const initialAgentNodes = createInitialAgentNodes();
   let agentNodes = $state.raw<AgentNodeData[]>(initialAgentNodes);
@@ -63,7 +76,7 @@
     buildFlowNodes(initialAgentNodes),
   );
   let edges = $state.raw<Edge[]>(buildFlowEdges(initialAgentNodes));
-  let traceRows = $state<TraceSummaryRow[]>(createInitialTraceRows());
+  let traceRows = $state<TraceObservationRow[]>(createInitialTraceRows());
   let traceTotals = $state<TraceTotals>({
     latency: "--",
     tokens: "--",
@@ -73,9 +86,20 @@
   let finalOutput = $state<FinalPocOutputView | null>(null);
   let diagramHtml = $state<string | null>(null);
   let diagramUnavailable = $state<DiagramUnavailableReason | null>(null);
+  let diagramLoading = $state(false);
   let activeRunId = $state<string | null>(null);
   let editPlanOpen = $state(false);
   let editPlanText = $state("");
+  /**
+   * Output handed from one incremental step to the next. The riskChecker step
+   * sends all of it back so the server can assemble the run and open the gate.
+   */
+  let qualifierOutput: QualifierOutput | null = null;
+  let architectOutput = $state<ArchitectOutput | null>(null);
+  let runToolCalls: PipelineView["toolCalls"] = [];
+  /** The ask and customer domain for the run in flight, reused by every step. */
+  let activePrompt = "";
+  let activeDomain: string | undefined;
   let responseAppliedToken = $state(0);
   /** Gap between trace refreshes; each poll starts only after the last lands. */
   const TRACE_POLL_INTERVAL_MS = 1500;
@@ -84,7 +108,9 @@
   let tracePollActive = false;
 
   const isInteractionLocked = $derived(
-    runState === "running" || runState === "paused",
+    runState === "running" ||
+      runState === "paused" ||
+      runState === "awaiting-confirmation",
   );
   onMount(() => {
     const handleApprove = (): void => {
@@ -114,22 +140,87 @@
   function createInitialAgentNodes(): AgentNodeData[] {
     return [
       {
+        id: "orchestrator",
+        label: "Orchestrator",
+        subtitle: "Dispatches and coordinates agents",
+        state: "idle",
+      },
+      {
         id: "qualifier",
-        label: "Qualifier",
+        label: "Requirements Agent",
         subtitle: "Extract structured requirements",
         state: "idle",
+        steps: [
+          {
+            id: "extract",
+            label: "extract_requirements",
+            status: "pending",
+          },
+        ],
+        currentStep: 0,
       },
       {
         id: "architect",
-        label: "Architect",
+        label: "Architect Agent",
         subtitle: "Design deployment and POC plan",
         state: "idle",
+        steps: [
+          {
+            id: "brand_search",
+            label: "brand_search",
+            status: "pending",
+          },
+          {
+            id: "brand_context",
+            label: "brand_context_lookup",
+            status: "pending",
+          },
+          {
+            id: "arch_pattern",
+            label: "arch_pattern_lookup",
+            status: "pending",
+          },
+          {
+            id: "arch_references",
+            label: "arch_pattern_references",
+            status: "pending",
+          },
+          {
+            id: "tool_selection",
+            label: "tool_selection_lookup",
+            status: "pending",
+          },
+          {
+            id: "synthesize",
+            label: "synthesize_plan",
+            status: "pending",
+          },
+        ],
+        currentStep: 0,
       },
       {
         id: "riskChecker",
-        label: "Risk Checker",
+        label: "Risk Agent",
         subtitle: "Evaluate controls and risks",
         state: "idle",
+        steps: [
+          {
+            id: "risk_policy",
+            label: "risk_policy_lookup",
+            status: "pending",
+          },
+          {
+            id: "evaluate",
+            label: "evaluate_rubric",
+            status: "pending",
+          },
+          {
+            id: "assess",
+            label: "produce_assessment",
+            status: "pending",
+          },
+        ],
+        currentStep: 0,
       },
       {
         id: "hitl",
@@ -137,39 +228,18 @@
         subtitle: "Human approval checkpoint",
         state: "idle",
       },
+      {
+        id: "mcpTools",
+        label: "MCP Tools",
+        subtitle:
+          "Brand search & context, architecture patterns, references, diagrams, tool selection, risk policies",
+        state: "idle",
+      },
     ];
   }
 
-  function createInitialTraceRows(): TraceSummaryRow[] {
-    return [
-      {
-        id: "qualifier",
-        label: "Qualifier",
-        status: "pending",
-        latency: "--",
-        tokens: "--",
-        cost: "--",
-        eval: "--",
-      },
-      {
-        id: "architect",
-        label: "Architect",
-        status: "pending",
-        latency: "--",
-        tokens: "--",
-        cost: "--",
-        eval: "--",
-      },
-      {
-        id: "riskChecker",
-        label: "Risk Checker",
-        status: "pending",
-        latency: "--",
-        tokens: "--",
-        cost: "--",
-        eval: "--",
-      },
-    ];
+  function createInitialTraceRows(): TraceObservationRow[] {
+    return [];
   }
 
   function buildFlowNodes(source: AgentNodeData[]): Node<AgentNodeData>[] {
@@ -185,11 +255,18 @@
 
   function buildFlowEdges(source: AgentNodeData[]): Edge[] {
     const stateById = new Map(source.map((node) => [node.id, node.state]));
-    return [
-      buildEdge("qualifier", "architect", stateById),
-      buildEdge("architect", "riskChecker", stateById),
-      buildEdge("riskChecker", "hitl", stateById),
+    const edges: Edge[] = [
+      // HITL → Orchestrator (user initiates)
+      buildEdge("hitl", "orchestrator", stateById),
+      // Orchestrator dispatch edges (one-way, top-to-bottom, agents only)
+      buildDispatchEdge("orchestrator", "qualifier", 1, stateById),
+      buildDispatchEdge("orchestrator", "architect", 2, stateById),
+      buildDispatchEdge("orchestrator", "riskChecker", 3, stateById),
+      // MCP gateway edges (from Architect and Risk Checker to MCP)
+      buildMcpEdge("architect", "mcpTools", stateById),
+      buildMcpEdge("riskChecker", "mcpTools", stateById),
     ];
+    return edges;
   }
 
   function buildEdge(
@@ -211,6 +288,54 @@
     };
   }
 
+  function buildDispatchEdge(
+    source: AgentId,
+    target: AgentId,
+    _number: number,
+    stateById: Map<AgentId, AgentNodeState>,
+  ): Edge {
+    // Only active if the target agent is currently running
+    const active = stateById.get(target) === "running";
+    return {
+      id: `${source}-${target}-dispatch`,
+      source,
+      target,
+      type: "connector",
+      data: { active },
+    };
+  }
+
+  function buildReturnEdge(
+    source: AgentId,
+    target: AgentId,
+    stateById: Map<AgentId, AgentNodeState>,
+  ): Edge {
+    const active = stateById.get(source) === "done";
+    return {
+      id: `${source}-${target}-return`,
+      source,
+      target,
+      type: "connector",
+      data: { active, dashed: true },
+    };
+  }
+
+  function buildMcpEdge(
+    source: AgentId,
+    target: AgentId,
+    stateById: Map<AgentId, AgentNodeState>,
+  ): Edge {
+    // Only active while the source agent is running (making tool calls)
+    const active = stateById.get(source) === "running";
+    return {
+      id: `${source}-${target}-mcp`,
+      source,
+      target,
+      type: "connector",
+      data: { active, dashed: true, mcp: true },
+    };
+  }
+
   function syncFlow(): void {
     nodes = buildFlowNodes(agentNodes);
     edges = buildFlowEdges(agentNodes);
@@ -226,17 +351,45 @@
     syncFlow();
   }
 
-  function setTraceStatus(
-    id: TraceSummaryRow["id"],
-    status: TraceSummaryRow["status"],
+  function updateAgentStep(
+    agentId: AgentId,
+    stepIndex: number,
+    status: "running" | "done",
+    detail?: string,
   ): void {
-    traceRows = traceRows.map((row) =>
-      row.id === id ? { ...row, status } : row,
-    );
+    agentNodes = agentNodes.map((node) => {
+      if (node.id !== agentId || !node.steps) {
+        return node;
+      }
+      const updatedSteps = node.steps.map((step, i) => {
+        if (i === stepIndex) {
+          return { ...step, status, detail };
+        }
+        return step;
+      });
+      return {
+        ...node,
+        steps: updatedSteps,
+        currentStep: status === "done" ? stepIndex + 1 : stepIndex,
+      };
+    });
+    syncFlow();
   }
 
-  function addMessage(role: ChatMessage["role"], text: string): void {
-    messages = [...messages, { id: crypto.randomUUID(), role, text }];
+  function addMessage(
+    role: ChatMessage["role"],
+    text: string,
+    logo?: { url: string; alt: string },
+  ): void {
+    messages = [
+      ...messages,
+      {
+        id: crypto.randomUUID(),
+        role,
+        text,
+        ...(logo ? { logoUrl: logo.url, logoAlt: logo.alt } : {}),
+      },
+    ];
   }
 
   function resetTraceTotals(): void {
@@ -254,11 +407,22 @@
     finalOutput = null;
     diagramHtml = null;
     diagramUnavailable = null;
+    diagramLoading = false;
     activeRunId = null;
     editPlanOpen = false;
     editPlanText = "";
+    clearHandoffState();
     runToken += 1;
     responseAppliedToken = runToken;
+  }
+
+  function clearHandoffState(): void {
+    qualifierOutput = null;
+    architectOutput = null;
+    runToolCalls = [];
+    pendingAgent = null;
+    activePrompt = "";
+    activeDomain = undefined;
   }
 
   function resetRunVisuals(): void {
@@ -270,103 +434,312 @@
     finalOutput = null;
     diagramHtml = null;
     diagramUnavailable = null;
+    diagramLoading = false;
     activeRunId = null;
     editPlanOpen = false;
     editPlanText = "";
-  }
-
-  function wait(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    clearHandoffState();
   }
 
   function isCancelled(token: number): boolean {
     return responseAppliedToken === token || token !== runToken;
   }
 
+  const AGENT_LABELS: Record<string, string> = {
+    qualifier: "Requirements Agent",
+    architect: "Architect Agent",
+    riskChecker: "Risk Agent",
+  };
+
+  /** Order the orchestrator dispatches in; "hitl" ends the agent chain. */
+  const NEXT_AGENT: Record<AgentId, AgentId | null> = {
+    qualifier: "architect",
+    architect: "riskChecker",
+    riskChecker: "hitl",
+    hitl: null,
+    orchestrator: null,
+    mcpTools: null,
+  };
+
+  interface AgentStepResponse {
+    status: "agent-complete" | "paused" | "completed";
+    output: unknown;
+    toolCalls: PipelineView["toolCalls"];
+    gate?: {
+      proposedPlan: PocPlan;
+      highSeverityRisks: RiskCheckerOutput["risks"];
+      review_reason?: string;
+    };
+    finalOutput?: FinalPocOutputView;
+  }
+
   function startRunNarrative(token: number): void {
-    playRunNarrative(token).catch((error: unknown) => {
+    updateAgent("orchestrator", { state: "running" });
+    addMessage("system", "Orchestrator starting pipeline...");
+    // The first agent runs without a confirmation click; every later one waits.
+    pendingAgent = "qualifier";
+    runState = "awaiting-confirmation";
+    confirmNextAgent().catch((error: unknown) => {
+      failRun(error, token);
+    });
+  }
+
+  function failRun(error: unknown, token: number): void {
+    if (isCancelled(token)) {
+      return;
+    }
+    stopTracePolling();
+    runState = "error";
+    pendingAgent = null;
+    addMessage(
+      "system",
+      error instanceof Error ? error.message : "Pipeline run failed.",
+    );
+  }
+
+  /**
+   * Runs one agent through the incremental /api/run endpoint. Throws on
+   * failure so the chain stops at the agent that broke instead of handing
+   * undefined to the next one.
+   */
+  async function runAgentStep(
+    agentId: AgentId,
+    prompt: string,
+    previousOutput: unknown,
+  ): Promise<AgentStepResponse> {
+    updateAgent(agentId, { state: "running" });
+
+    const response = await fetch("/api/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        routingMode,
+        agentId,
+        previousOutput,
+        domain: activeDomain,
+        runId: activeRunId,
+        // Only the final step needs the accumulated run state.
+        ...(agentId === "riskChecker"
+          ? { qualifierOutput, priorToolCalls: runToolCalls }
+          : {}),
+      }),
+    });
+    const payload = (await response.json()) as
+      | AgentStepResponse
+      | { error: string };
+    if (!response.ok || "error" in payload) {
+      updateAgent(agentId, { state: "warning" });
+      throw new Error("error" in payload ? payload.error : "Agent run failed");
+    }
+
+    updateAgent(agentId, { state: "done" });
+    const agent = agentNodes.find((node) => node.id === agentId);
+    if (agent?.steps) {
+      agent.steps.forEach((_, index) => {
+        updateAgentStep(agentId, index, "done");
+      });
+    }
+    runToolCalls = [...runToolCalls, ...payload.toolCalls];
+    return payload;
+  }
+
+  /** Each agent takes the previous one's structured output as its input. */
+  function previousOutputFor(agentId: AgentId): unknown {
+    if (agentId === "architect") {
+      return qualifierOutput;
+    }
+    if (agentId === "riskChecker") {
+      return architectOutput;
+    }
+    return undefined;
+  }
+
+  /**
+   * Runs the pending agent, shows its result, then either parks on the next
+   * confirmation or opens the HITL gate. This is the whole orchestration loop
+   * the demo is meant to show, so each transition gets its own chat line.
+   */
+  async function confirmNextAgent(): Promise<void> {
+    if (!pendingAgent || runState !== "awaiting-confirmation" || !activeRunId) {
+      return;
+    }
+    const agentId = pendingAgent;
+    const runId = activeRunId;
+    pendingAgent = null;
+    runState = "running";
+    const token = runToken;
+
+    addMessage("system", `Orchestrator → ${AGENT_LABELS[agentId]}: running...`);
+
+    try {
+      const payload = await runAgentStep(
+        agentId,
+        activePrompt,
+        previousOutputFor(agentId),
+      );
       if (isCancelled(token)) {
         return;
       }
-      const message =
-        error instanceof Error ? error.message : "Pipeline animation failed.";
-      addMessage("system", message);
-    });
+
+      if (agentId === "qualifier") {
+        qualifierOutput = payload.output as QualifierOutput;
+      } else if (agentId === "architect") {
+        architectOutput = payload.output as ArchitectOutput;
+        announceBrand(runToolCalls);
+      }
+
+      addMessage(
+        "system",
+        formatAgentResult(
+          AGENT_LABELS[agentId],
+          payload.output as
+            | QualifierOutput
+            | ArchitectOutput
+            | RiskCheckerOutput,
+        ),
+      );
+      await refreshTraceTable(runId);
+
+      const next = NEXT_AGENT[agentId];
+      if (next === "hitl") {
+        openHitlGate(payload);
+        return;
+      }
+      if (!next) {
+        return;
+      }
+
+      pendingAgent = next;
+      runState = "awaiting-confirmation";
+      addMessage(
+        "system",
+        `Ready to dispatch ${AGENT_LABELS[next]}. Confirm to continue.`,
+      );
+    } catch (error) {
+      failRun(error, token);
+    }
   }
 
-  async function playRunNarrative(token: number): Promise<void> {
-    updateAgent("qualifier", { state: "running" });
-    setTraceStatus("qualifier", "running");
-    await wait(900);
-    if (isCancelled(token)) {
-      return;
-    }
-    updateAgent("qualifier", { state: "done" });
-    setTraceStatus("qualifier", "done");
+  /**
+   * Final step landed. A paused run has a server-side pending HITL record that
+   * Approve/Edit resolve; a clean run skips the gate and finishes here.
+   */
+  function openHitlGate(payload: AgentStepResponse): void {
+    updateAgent("orchestrator", { state: "done" });
 
-    updateAgent("architect", { state: "running" });
-    setTraceStatus("architect", "running");
-    await wait(1500);
-    if (isCancelled(token)) {
+    if (payload.status !== "paused" || !payload.gate) {
+      stopTracePolling();
+      updateAgent("hitl", { state: "done" });
+      runState = "completed";
+      finalOutput = payload.finalOutput ?? null;
+      addMessage(
+        "system",
+        "No high-severity risks found — the HITL gate was skipped. The POC plan is ready.",
+      );
       return;
     }
-    updateAgent("architect", { state: "done" });
-    setTraceStatus("architect", "done");
 
-    updateAgent("riskChecker", { state: "running" });
-    setTraceStatus("riskChecker", "running");
-    await wait(1300);
-    if (isCancelled(token)) {
-      return;
+    const { gate } = payload;
+    updateAgent("hitl", {
+      state: "paused",
+      proposedPlan: gate.proposedPlan,
+      reviewReason: gate.review_reason,
+      riskSummary: gate.highSeverityRisks,
+    });
+    if (gate.highSeverityRisks.length > 0) {
+      updateAgent("riskChecker", { state: "warning" });
     }
-    updateAgent("riskChecker", { state: "done" });
-    setTraceStatus("riskChecker", "done");
-    updateAgent("hitl", { state: "running" });
+    editPlanText = JSON.stringify(gate.proposedPlan, null, 2);
+    runState = "paused";
+    addMessage(
+      "system",
+      "Pipeline paused at the HITL gate — approve or edit the POC plan to continue.",
+    );
   }
 
   function applyTraceSummary(summary: RunTraceSummary): void {
-    traceRows = summary.agents.map((agent) => {
-      const previous = traceRows.find((row) => row.id === agent.agent);
-      const hasData = agent.latencyMs !== null || agent.tokenCount !== null;
-      const evalScore = agent.evalScore;
-      let status: TraceSummaryRow["status"] = previous?.status ?? "pending";
-      if (hasData) {
-        status = evalScore !== null && evalScore < 3 ? "warning" : "done";
-      }
-      return {
-        id: agent.agent,
-        label: agent.label,
-        status,
+    const observations: TraceObservationRow[] = [];
+    let rowId = 0;
+
+    // Add pipeline SPAN
+    observations.push({
+      id: `obs-${rowId++}`,
+      name: "agentflow.pipeline",
+      type: "SPAN",
+      latency:
+        summary.aggregate.latencyMs === null
+          ? "--"
+          : `${(summary.aggregate.latencyMs / 1000).toFixed(1)}s`,
+      tokens:
+        summary.aggregate.totalTokens === null
+          ? "--"
+          : summary.aggregate.totalTokens.toLocaleString("en-US"),
+      cost:
+        summary.aggregate.costUsd === null
+          ? "--"
+          : `$${summary.aggregate.costUsd.toFixed(4)}`,
+      level: "DEFAULT",
+    });
+
+    // Add agent observations
+    for (const agent of summary.agents) {
+      // AGENT observation
+      observations.push({
+        id: `obs-${rowId++}`,
+        name: `agentflow.agent.${agent.agent}`,
+        type: "AGENT",
         latency:
           agent.latencyMs === null
-            ? (previous?.latency ?? "--")
+            ? "--"
             : `${(agent.latencyMs / 1000).toFixed(1)}s`,
         tokens:
           agent.tokenCount === null
-            ? (previous?.tokens ?? "--")
+            ? "--"
             : agent.tokenCount.toLocaleString("en-US"),
-        cost:
-          agent.costUsd === null
-            ? (previous?.cost ?? "--")
-            : `$${agent.costUsd.toFixed(4)}`,
-        eval:
-          evalScore === null ? (previous?.eval ?? "--") : evalScore.toFixed(1),
-      };
-    });
-    if (summary.hitl) {
-      traceRows = [
-        ...traceRows,
-        {
-          id: "hitl",
-          label: "HITL Review",
-          status: "done",
-          latency: `${(summary.hitl.humanLatencyMs / 1000).toFixed(1)}s`,
-          tokens: "--",
-          cost: "--",
-          eval: summary.hitl.decision,
-        },
-      ];
+        cost: agent.costUsd === null ? "--" : `$${agent.costUsd.toFixed(4)}`,
+        level:
+          agent.evalScore !== null && agent.evalScore < 3
+            ? "WARNING"
+            : "DEFAULT",
+      });
+
+      // GENERATION observation
+      observations.push({
+        id: `obs-${rowId++}`,
+        name: `${agent.label} generation`,
+        type: "GENERATION",
+        latency:
+          agent.latencyMs === null
+            ? "--"
+            : `${(agent.latencyMs / 1000).toFixed(1)}s`,
+        tokens:
+          agent.tokenCount === null
+            ? "--"
+            : agent.tokenCount.toLocaleString("en-US"),
+        cost: agent.costUsd === null ? "--" : `$${agent.costUsd.toFixed(4)}`,
+        level:
+          agent.evalScore !== null && agent.evalScore < 3
+            ? "WARNING"
+            : "DEFAULT",
+      });
     }
+
+    // Add HITL EVENT if present
+    if (summary.hitl) {
+      observations.push({
+        id: `obs-${rowId++}`,
+        name: "hitl_gate_decision",
+        type: "EVENT",
+        latency: `${(summary.hitl.humanLatencyMs / 1000).toFixed(1)}s`,
+        tokens: "--",
+        cost: "--",
+        level: "DEFAULT",
+      });
+    }
+
+    traceRows = observations;
+
     traceTotals = {
       latency:
         summary.aggregate.latencyMs === null
@@ -436,71 +809,151 @@
   }
 
   /**
-   * Builds the architecture diagram from the run's MCP tool calls: diagram_data
-   * from arch_pattern_lookup, header brand from brand_context_lookup. A
-   * low-confidence pattern match carries no diagram_data and renders none.
+   * Shows the confirmed brand in the conversation: the logo comes from the
+   * brand_search candidate the Architect selected (or brand_context_lookup
+   * when an explicit domain hint skipped the search). Logo first — the deeper
+   * context is what the Architect then grounds the plan in.
    */
-  function applyDiagram(pipeline: PipelineResponse["pipeline"]): void {
-    const source = diagramSourceFromToolCalls(pipeline.toolCalls);
-    diagramUnavailable = source.unavailable;
-    diagramHtml = source.diagram
-      ? renderDiagramHtml({
-          diagram: source.diagram,
-          brand: source.brand,
-          fallbackTitle: pipeline.architect.pattern_match.pattern_id.replace(
+  function announceBrand(toolCalls: PipelineView["toolCalls"]): void {
+    const brand = brandFromToolCalls(toolCalls);
+    if (!brand) {
+      return;
+    }
+    addMessage(
+      "system",
+      `Brand context confirmed: ${brand.companyName ?? "customer brand"}`,
+      brand.logoUrl
+        ? { url: brand.logoUrl, alt: `${brand.companyName ?? "Company"} logo` }
+        : undefined,
+    );
+  }
+
+  /**
+   * Fetches the architecture diagram on demand via /api/diagram. arch_diagram
+   * is only called here — after the run (and therefore risk evaluation) has
+   * completed — never by an agent mid-pipeline.
+   */
+  async function requestDiagram(): Promise<void> {
+    if (!architectOutput || diagramLoading || diagramHtml) {
+      return;
+    }
+    diagramLoading = true;
+    try {
+      const response = await fetch("/api/diagram", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          patternId: architectOutput.pattern_match.pattern_id,
+          brand: brandFromToolCalls(runToolCalls),
+          fallbackTitle: architectOutput.pattern_match.pattern_id.replace(
             /_/g,
             " ",
           ),
-          subtitle: pipeline.architect.architecture_summary,
-        })
-      : null;
-  }
-
-  function applyPipelineData(response: PipelineResponse): void {
-    responseAppliedToken = runToken;
-    activeRunId = response.runId;
-    applyDiagram(response.pipeline);
-    void refreshTraceTable(response.runId);
-    const highSeverityRisks =
-      response.gate?.highSeverityRisks ??
-      response.pipeline.riskChecker.risks.filter(
-        (risk) => risk.severity === "high",
-      );
-    agentNodes = createInitialAgentNodes().map((node) => {
-      if (node.id === "qualifier" || node.id === "architect") {
-        return { ...node, state: "done" };
+          subtitle: architectOutput.architecture_summary,
+        }),
+      });
+      const payload = (await response.json()) as
+        | { status: "ok"; html: string }
+        | { status: "unavailable"; message: string }
+        | { error: string };
+      if (!response.ok || "error" in payload) {
+        throw new Error(
+          "error" in payload ? payload.error : "Diagram fetch failed",
+        );
       }
-      if (node.id === "riskChecker") {
-        return {
-          ...node,
-          state: highSeverityRisks.length > 0 ? "warning" : "done",
-        };
+      if (payload.status === "ok") {
+        diagramHtml = payload.html;
+        diagramUnavailable = null;
+      } else {
+        diagramHtml = null;
+        diagramUnavailable = architectOutput.pattern_match.weak_match
+          ? "weak-match"
+          : "no-diagram-data";
+        addMessage("system", payload.message);
       }
-      return {
-        ...node,
-        state: response.status === "paused" ? "paused" : "done",
-        proposedPlan:
-          response.gate?.proposedPlan ?? response.pipeline.architect.poc_plan,
-        reviewReason: response.gate?.review_reason,
-        riskSummary: highSeverityRisks,
-      };
-    });
-    syncFlow();
-    if (response.status === "paused") {
-      runState = "paused";
+    } catch (error) {
       addMessage(
         "system",
-        "Human review required. Approve or edit the POC plan in the HITL Gate node.",
+        error instanceof Error ? error.message : "Diagram fetch failed.",
       );
-      editPlanText = JSON.stringify(response.gate?.proposedPlan, null, 2);
-      return;
+    } finally {
+      diagramLoading = false;
     }
-    runState = "completed";
-    finalOutput = response.finalOutput ?? null;
-    addMessage("system", "Pipeline completed. The draft POC plan is ready.");
   }
 
-  async function runPipeline(prompt: string, domain?: string): Promise<void> {
+  /**
+   * Renders an agent's structured output as a chat bubble. Fields must match
+   * the zod schemas in $lib/agents/types — the chat panel prints plain text,
+   * so no markdown markers here.
+   */
+  function formatAgentResult(
+    agentName: string,
+    output: QualifierOutput | ArchitectOutput | RiskCheckerOutput,
+  ): string {
+    if (agentName === "Requirements Agent") {
+      const qualifier = output as QualifierOutput;
+      return [
+        `${agentName} — structured requirements`,
+        "",
+        "Use cases:",
+        ...qualifier.named_use_cases.map((item) => `  • ${item}`),
+        "Constraints:",
+        ...qualifier.partner_constraints.map((item) => `  • ${item}`),
+        "Success criteria:",
+        ...qualifier.success_criteria.map((item) => `  • ${item}`),
+        "Exit criteria:",
+        ...qualifier.exit_criteria.map((item) => `  • ${item}`),
+        ...(qualifier.ambiguity_flags.length > 0
+          ? [
+              "Needs clarification:",
+              ...qualifier.ambiguity_flags.map((item) => `  • ${item}`),
+            ]
+          : []),
+      ].join("\n");
+    }
+    if (agentName === "Architect Agent") {
+      const architect = output as ArchitectOutput;
+      return [
+        `${agentName} — deployment architecture`,
+        "",
+        architect.architecture_summary,
+        "",
+        `Pattern: ${architect.pattern_match.pattern_id} (confidence ${architect.pattern_match.confidence.toFixed(2)})`,
+        "",
+        `Scope: ${architect.poc_plan.scope}`,
+        `Timeline: ${architect.poc_plan.timeline}`,
+        `Resourcing: ${architect.poc_plan.resource_estimate}`,
+        "Data zones:",
+        ...architect.poc_plan.data_zones.map((zone) => `  • ${zone}`),
+        "Integrations:",
+        ...architect.poc_plan.integrations.map((item) => `  • ${item}`),
+        "",
+        `Deployment notes: ${architect.deployment_notes}`,
+      ].join("\n");
+    }
+    if (agentName === "Risk Agent") {
+      const riskChecker = output as RiskCheckerOutput;
+      return [
+        `${agentName} — risk and controls review`,
+        "",
+        `Overall score: ${riskChecker.overall_score.toFixed(1)}/5`,
+        `Recommendation: ${riskChecker.recommendation}`,
+        "",
+        "Risks:",
+        ...riskChecker.risks.map(
+          (risk) => `  • [${risk.severity.toUpperCase()}] ${risk.issue}`,
+        ),
+      ].join("\n");
+    }
+    return `${agentName} results: ${JSON.stringify(output, null, 2)}`;
+  }
+
+  /**
+   * Starts a run. The orchestrator dispatches the first agent immediately and
+   * then waits for a confirmation click before each subsequent one, so the
+   * hand-off between agents is visible rather than hidden inside one request.
+   */
+  function runPipeline(prompt: string, domain?: string): void {
     if (isInteractionLocked) {
       return;
     }
@@ -509,38 +962,13 @@
     addMessage("user", prompt);
     addMessage("system", `Running pipeline in ${routingMode} mode.`);
     runToken += 1;
-    const token = runToken;
     responseAppliedToken = 0;
+    activePrompt = prompt;
+    activeDomain = domain;
     const runId = crypto.randomUUID();
     activeRunId = runId;
     startTracePolling(runId);
-    startRunNarrative(token);
-    try {
-      const response = await fetch("/api/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt, routingMode, domain, runId }),
-      });
-      const payload = (await response.json()) as
-        | PipelineResponse
-        | { error: string };
-      if (!response.ok || "error" in payload) {
-        throw new Error(
-          "error" in payload ? payload.error : "Pipeline run failed",
-        );
-      }
-      applyPipelineData(payload);
-      stopTracePolling();
-    } catch (error) {
-      stopTracePolling();
-      responseAppliedToken = token;
-      runState = "error";
-      updateAgent("qualifier", { state: "warning" });
-      addMessage(
-        "system",
-        error instanceof Error ? error.message : "Pipeline run failed.",
-      );
-    }
+    startRunNarrative(runToken);
   }
 
   function openEditPlan(): void {
@@ -630,14 +1058,31 @@
       class="grid min-h-0 flex-1 grid-cols-[450px_minmax(0,1fr)] divide-x-2 divide-darkgrey-400 overflow-hidden"
     >
       <ChatPanel
+        awaitingConfirmation={runState === "awaiting-confirmation"}
         canReset={runState !== "idle" || messages.length > 0}
+        diagramAvailable={architectOutput !== null &&
+          !architectOutput.pattern_match.weak_match}
         {diagramHtml}
+        {diagramLoading}
         {diagramUnavailable}
         disabled={isInteractionLocked}
         {messages}
+        onConfirm={confirmNextAgent}
+        onRequestDiagram={() => {
+          requestDiagram().catch((error: unknown) => {
+            addMessage(
+              "system",
+              error instanceof Error ? error.message : "Diagram fetch failed.",
+            );
+          });
+        }}
         onReset={resetConversation}
+        onRoutingModeChange={(mode) => {
+          routingMode = mode;
+        }}
         onSend={runPipeline}
         output={finalOutput}
+        {routingMode}
       />
 
       <section class="flex min-h-0 flex-col bg-darkgrey-50">
@@ -657,6 +1102,36 @@
             panOnDrag={false}
             zoomOnScroll={false}
           >
+            <svg style="position: absolute; width: 0; height: 0;">
+              <defs>
+                <marker
+                  id="arrowhead"
+                  markerHeight="5"
+                  markerWidth="6"
+                  orient="auto"
+                  refX="5"
+                  refY="2.5"
+                >
+                  <polygon
+                    fill="oklch(0.66 0.008 260)"
+                    points="0 0, 6 2.5, 0 5"
+                  />
+                </marker>
+                <marker
+                  id="arrowhead-active"
+                  markerHeight="5"
+                  markerWidth="6"
+                  orient="auto"
+                  refX="5"
+                  refY="2.5"
+                >
+                  <polygon
+                    fill="oklch(0.55 0.16 250)"
+                    points="0 0, 6 2.5, 0 5"
+                  />
+                </marker>
+              </defs>
+            </svg>
             <Background gap={18} size={1.2} variant={BackgroundVariant.Dots} />
             <Controls showInteractive={false} />
           </SvelteFlow>

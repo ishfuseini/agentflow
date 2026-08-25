@@ -55,13 +55,15 @@ Key reference documents:
 
 **Rationale:** The SDK already knows how to call MCP tools, parse responses, and handle errors. Agents declare which tools they can call; the SDK handles the protocol. This avoids writing a custom MCP client. The server (FastMCP v4 + TypeScript, 102-file source pack, Brandfetch + logo.dev caching) is a separate project whose I/O contracts are defined in `docs/mcp/Overview.md`.
 
-The integration contract from `docs/mcp/Overview.md`:
+The integration contract (7 tools; verified against the live server):
 - Qualifier Agent: no tool calls (pure reasoning step)
-- Architect Agent: `arch_pattern_lookup` (input: `industry`, `data_stack`, `cloud`, `constraints`, `latency`), `tool_selection_lookup` (input: `use_case`, `data_stack`, `constraints`, `latency`), `brand_context_lookup` (input: `domain`)
-- Risk Checker Agent: `risk_policy_lookup` (input: `industry`, `data_classification`, `region`, `deployment`, `constraints`)
-- `diagram_data` from `arch_pattern_lookup` → passed to architecture-diagram rendering
+- Brand resolution (first, surfacing a logo in the conversation): `brand_search` (input: `query`, optional `strategy`; returns candidates with `name`, `domain`, `logo_url`) → the selected candidate's logo is shown immediately and its `domain` feeds `brand_context_lookup` (input: `domain`) for deeper company context
+- Architect Agent: `arch_pattern_lookup` (input: `industry`, `data_stack`, `constraints`, optional `cloud`/`latency`) → `arch_pattern_references` (input: `pattern_id` + original `industry`/`data_stack`/`constraints`) → `tool_selection_lookup` (input: `use_case`, `data_stack`, `constraints`, optional `latency`)
+- Risk Checker Agent: `risk_policy_lookup` (input: `industry`, `data_classification`, `region`, `deployment`, optional `constraints`) — runs before any diagram fetch
+- `arch_diagram` (input: `pattern_id`): called on demand only, after risk evaluation; returns `diagram_data` + `available` (`available:false` with a message for non-curated patterns)
+- `diagram_data` from `arch_diagram` → passed to architecture-diagram rendering
 - `hitl_required` + `review_reason` from `risk_policy_lookup` → triggers HITL gate
-- Matching is deterministic, rules-based: industry match (40%) → data stack overlap (30%) → constraint coverage (30%). Curated matches (confidence >= 0.85) include `diagram_data` + `source_references`. Weak matches fall back to a generic enterprise AI POC pattern with confidence < 0.5.
+- Matching is deterministic, rules-based: industry match (40%) → data stack overlap (30%) → constraint coverage (30%). Curated matches (confidence >= 0.85) support diagram fetch via `arch_diagram` and references via `arch_pattern_references`. Weak matches fall back to the generic enterprise AI POC pattern (`generic_enterprise_ai_poc`, confidence < 0.5) with no diagram.
 
 **Alternatives considered:**
 - Direct HTTP calls to MCP server endpoints — would need to implement MCP protocol manually
@@ -114,10 +116,12 @@ The integration contract from `docs/mcp/Overview.md`:
 **Rationale:** The skill already exists in the repo and defines the exact visual language (color palette, typography, layout, connection rules). The `docs/mcp/Overview.md` integration contract specifies passing `diagram_data` to this skill. Using the skill ensures visual consistency.
 
 The rendering flow:
-1. Architect Agent calls `arch_pattern_lookup`, receives `diagram_data` (components, connections, boundaries)
-2. Architect Agent calls `brand_context_lookup`, receives `logo_url` and `company_name`
-3. Pipeline passes `diagram_data` + `logo_url` + `company_name` to the architecture-diagram renderer
-4. Renderer produces an inline HTML/SVG diagram displayed in the structured output panel
+1. `brand_search` resolves the brand from the prompt; the selected candidate's logo is shown in the conversation immediately, and its domain feeds `brand_context_lookup` for deeper context
+2. Architect Agent calls `arch_pattern_lookup` + `arch_pattern_references`; the pattern and its source references are presented for confirmation
+3. Risk Checker Agent calls `risk_policy_lookup` (risk evaluation completes before any diagram fetch)
+4. If a diagram is requested: `arch_diagram(pattern_id)` returns `diagram_data` (components, connections, boundaries); `available:false` means no diagram
+5. Pipeline passes `diagram_data` + the confirmed brand candidate's `logo_url` + `name` to the architecture-diagram renderer
+6. Renderer produces an inline HTML/SVG diagram displayed in the structured output panel
 
 **Alternatives considered:**
 - Mermaid.js — different visual style; the architecture-diagram skill's dark theme matches the ishlab design language
@@ -171,7 +175,7 @@ The rendering flow:
 
 **[Cold-start latency]** → First run after Fly.io VM boot may feel slow (provider warm-up, MCP server cold start). Mitigation: Throwaway warm-up run a few minutes before the call.
 
-**[agentflow-mcp availability]** → The MCP server is deployed at `agentflow-mcp.fly.dev/mcp` (Fly.io, scale-to-zero when idle). If it's down or cold, the Architect and Risk Checker agents can't call their tools. Mitigation: The MCP integration contract specifies graceful fallbacks (brand context unavailable, low-confidence pattern match). For local dev, the MCP runs via stdio (MCP Inspector). Do a warm-up run before the interview to wake the Fly.io instance. The MCP server has its own health checks (`scripts/mcp-list-check.ts` verifies all 4 tools are discoverable).
+**[agentflow-mcp availability]** → The MCP server is deployed at `agentflow-mcp.fly.dev/mcp` (Fly.io, scale-to-zero when idle). If it's down or cold, the Architect and Risk Checker agents can't call their tools. Mitigation: The MCP integration contract specifies graceful fallbacks (brand context unavailable, low-confidence pattern match). For local dev, the MCP runs via stdio (MCP Inspector). Do a warm-up run before the interview to wake the Fly.io instance. The MCP server has its own health checks (`scripts/mcp-list-check.ts` verifies all 7 tools are discoverable).
 
 **[Single-user state (no persistence)]** → Pipeline state lives in Svelte stores on the server. If the server restarts mid-pipeline, state is lost. This is acceptable for a demo — restart and re-run. Not acceptable for production, but that's a non-goal.
 

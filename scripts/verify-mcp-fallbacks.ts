@@ -1,9 +1,10 @@
 /**
- * Verifies the two graceful-fallback contracts from the mcp-tool-integration
- * spec (tasks 3.6 and 3.7) against the live agentflow-mcp server:
+ * Verifies the graceful-fallback contracts from the mcp-tool-integration
+ * spec (tasks 3.9 and 3.10) against the live agentflow-mcp server:
  *
- *   3.6 brand_context_lookup unavailable  -> resolves with available=false, no logo
- *   3.7 arch_pattern_lookup weak match    -> resolves with confidence < 0.5, no diagram_data
+ *   3.9  brand_context_lookup unavailable  -> resolves with available=false, no logo
+ *   3.10 arch_pattern_lookup weak match    -> generic_enterprise_ai_poc, confidence < 0.5
+ *        arch_diagram on the fallback      -> available=false, no diagram_data
  *
  * Both fallbacks are decided server-side, so this needs no model and no LLM
  * credentials — only AGENTFLOW_MCP_URL. The agents' downstream reaction to
@@ -61,7 +62,7 @@ console.log(`agentflow-mcp: ${url}\n`);
 await server.connect();
 
 try {
-	console.log("3.6 — brand_context_lookup returns unavailable, does not throw");
+	console.log("3.9 — brand_context_lookup returns unavailable, does not throw");
 	let brand: Record<string, unknown>;
 	try {
 		brand = parseToolResult(
@@ -79,12 +80,12 @@ try {
 		`available === false (got ${JSON.stringify(brand.available)})`,
 	);
 	expect(
-		brand.logo_url === null,
-		`logo_url === null (got ${JSON.stringify(brand.logo_url)})`,
+		brand.logo_url === null || brand.logo_url === undefined,
+		`logo_url is null/omitted (got ${JSON.stringify(brand.logo_url)})`,
 	);
 	expect(
-		brand.company_name === null,
-		`company_name === null (got ${JSON.stringify(brand.company_name)})`,
+		brand.company_name === null || brand.company_name === undefined,
+		`company_name is null/omitted (got ${JSON.stringify(brand.company_name)})`,
 	);
 	expect(
 		brand.confidence === 0,
@@ -93,7 +94,7 @@ try {
 	expect(typeof brand.message === "string", "carries a human-readable message");
 
 	console.log(
-		"\n3.7 — arch_pattern_lookup returns weak match with no diagram, does not throw",
+		"\n3.10 — arch_pattern_lookup returns weak match with no diagram, does not throw",
 	);
 	let arch: Record<string, unknown>;
 	try {
@@ -120,12 +121,41 @@ try {
 		`confidence < 0.5 (got ${JSON.stringify(arch.confidence)})`,
 	);
 	expect(
+		arch.pattern_id === "generic_enterprise_ai_poc",
+		`pattern_id is generic_enterprise_ai_poc (got ${JSON.stringify(arch.pattern_id)})`,
+	);
+	expect(
 		arch.diagram_data === undefined || arch.diagram_data === null,
-		"diagram_data omitted for a weak match",
+		"diagram_data never returned inline by arch_pattern_lookup",
+	);
+	expect(
+		arch.source_references === undefined || arch.source_references === null,
+		"source_references never returned inline by arch_pattern_lookup",
 	);
 	expect(
 		Array.isArray(arch.recommended_components),
 		"still returns recommended_components to build on",
+	);
+
+	console.log(
+		"\n3.10 — arch_diagram on the fallback pattern returns available=false",
+	);
+	const diagram = parseToolResult(
+		await server.callTool("arch_diagram", {
+			pattern_id: arch.pattern_id as string,
+		}),
+	);
+	expect(
+		diagram.available === false,
+		`available === false (got ${JSON.stringify(diagram.available)})`,
+	);
+	expect(
+		diagram.diagram_data === undefined || diagram.diagram_data === null,
+		"diagram_data is null for the fallback pattern",
+	);
+	expect(
+		typeof diagram.message === "string",
+		"carries a human-readable message",
 	);
 } finally {
 	await server.close().catch(() => undefined);
@@ -133,7 +163,7 @@ try {
 
 console.log("\n=== Summary ===");
 if (failures.length === 0) {
-	console.log("✓ Both graceful-fallback contracts hold");
+	console.log("✓ All graceful-fallback contracts hold");
 	process.exit(0);
 }
 console.error(`✗ ${failures.length} assertion(s) failed`);
