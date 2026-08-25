@@ -35,7 +35,7 @@ function parseToolResult(result: unknown): Record<string, unknown> {
 		? result
 		: ((result as { content?: unknown[] } | null | undefined)?.content ?? []);
 	const text = (blocks as Array<{ type?: string; text?: string }>).find(
-		(block) => block?.type === "text",
+		(block) => block.type === "text",
 	)?.text;
 	if (!text) {
 		throw new Error("arch_diagram returned no text content block");
