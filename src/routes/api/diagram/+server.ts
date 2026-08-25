@@ -83,7 +83,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 
 		const brandContext: BrandContext | null =
-			brand && (brand.companyName || brand.logoUrl) ? brand : null;
+			brand && (brand.companyName ?? brand.logoUrl) ? brand : null;
 		return json({
 			status: "ok",
 			html: renderDiagramHtml({
