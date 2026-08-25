@@ -54,8 +54,30 @@ function parseJsonText(text: string): unknown {
 	}
 }
 
+type ContentBlock = { type?: unknown; text?: unknown };
+type ContentEnvelope = { type?: unknown; text?: unknown; content?: unknown };
+
+const isContentBlock = (value: unknown): value is ContentBlock =>
+	typeof value === "object" && value !== null;
+
+const isContentEnvelope = (value: unknown): value is ContentEnvelope =>
+	typeof value === "object" && value !== null;
+
+const extractTextFromBlock = (block: ContentBlock): string | null =>
+	block.type === "text" && typeof block.text === "string" ? block.text : null;
+
+const extractTextFromBlocks = (blocks: unknown[]): string | null => {
+	for (const block of blocks) {
+		if (isContentBlock(block)) {
+			const text = extractTextFromBlock(block);
+			if (text !== null) return text;
+		}
+	}
+	return null;
+};
+
 /**
- * MCP tool outputs arrive as content blocks — a single `{ type: "text", text }
+ * MCP tool outputs arrive as content blocks — a single `{ type: "text", text }`
  * object, a content-block array, or a `{ content: [...] }` envelope — with the
  * JSON payload inside the text block. Unwraps that envelope so downstream
  * consumers (diagram rendering, HITL gate) get structured data instead of
@@ -66,24 +88,13 @@ function parseJsonOrRaw(value: unknown): unknown {
 		return parseJsonText(value);
 	}
 	if (Array.isArray(value)) {
-		const textBlock = value.find(
-			(block) =>
-				typeof block === "object" &&
-				block !== null &&
-				(block as { type?: unknown }).type === "text",
-		) as { text?: unknown } | undefined;
-		return typeof textBlock?.text === "string"
-			? parseJsonText(textBlock.text)
-			: value;
+		const text = extractTextFromBlocks(value);
+		return text !== null ? parseJsonText(text) : value;
 	}
-	if (typeof value === "object" && value !== null) {
-		const record = value as { type?: unknown; text?: unknown; content?: unknown };
-		if (record.type === "text" && typeof record.text === "string") {
-			return parseJsonText(record.text);
-		}
-		if (Array.isArray(record.content)) {
-			return parseJsonOrRaw(record.content);
-		}
+	if (isContentEnvelope(value)) {
+		const inlineText = extractTextFromBlock(value);
+		if (inlineText !== null) return parseJsonText(inlineText);
+		if (Array.isArray(value.content)) return parseJsonOrRaw(value.content);
 	}
 	return value;
 }
